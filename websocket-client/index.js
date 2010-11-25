@@ -209,10 +209,10 @@ var WebSocket = function(url, proto, opts) {
         // FRAME_NO
         function(buf, off) {
             if (buf[off] & 0x80) {
-                throw new Error('High-byte frames not yet supported');
+                frameType = FRAME_HI;
+            } else {
+                frameType = FRAME_LO;
             }
-
-            frameType = FRAME_LO;
             return 1;
         },
 
@@ -280,9 +280,13 @@ var WebSocket = function(url, proto, opts) {
 
         // FRAME_HI
         function(buf, off) {
-            debug('High-byte framing not yet supported');
-
             frameType = FRAME_NO;
+            if (buf[off] === 0) {
+              self.close();
+              return 1;
+            }
+
+            debug('High-byte framing not yet supported');
             return buf.length - off;
         }
     ];
