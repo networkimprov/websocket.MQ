@@ -1,7 +1,6 @@
-require.paths.unshift('/home/liam/work/node-lib');
 
 var sys = require('sys');
-var WebSocket = require('websocket-client').WebSocket;
+var WebSocket = require('./websocket-client').WebSocket;
 
 function makeMsg(iJso, iData) {
   var aReq = JSON.stringify(iJso);
