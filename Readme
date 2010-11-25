@@ -1,0 +1,30 @@
+
+websocket.MQ
+
+https://github.com/networkimprov/websocket.MQ
+
+A reliable message queue service for websocket-connected clients.
+
+As with email, each message is posted with a list of recipients.
+On disk, messages are stored in separate files, within transient directories for each recipient.
+
+Message format
+  f0f0{"op":"type" ...}data
+  4 hex digits, padded with spaces, giving the size of the JSON metadata object
+  JSON metadata
+  arbitrary length data
+
+Message types
+  To server: register, login, post, ack
+  To client: info, quit, deliver, ack
+
+Dependencies:
+  Node.js 0.2.x https://github.com/ry/node
+  Bundled:
+    node-websocket-server https://github.com/miksago/node-websocket-server
+
+Roadmap:
+  Node- & browser-compatible client library
+  SSL
+  Email gateway with SMTP client and LMTP server
+
