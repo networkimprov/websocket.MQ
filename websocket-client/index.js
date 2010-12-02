@@ -324,6 +324,8 @@ var WebSocket = function(url, proto, opts) {
 
     // Handle errors from any source (HTTP client, stream, etc)
     var errorListener = function(e) {
+        if (readyState === CLOSING || readyState === CLOSED)
+            return;
         process.nextTick(function() {
             self.emit('wserror', e);
 
@@ -369,7 +371,8 @@ var WebSocket = function(url, proto, opts) {
             //      closer to the spirit of the API in that the caller
             //      never sees us transition directly to CLOSED. Instead, we
             //      just seem to have an infinitely fast closing handshake.
-            if (stream.write('', 'binary')) {
+            if (stream.write('', 'binary') || !stream.fd) {
+                if (!stream.fd) stream = undefined;
                 process.nextTick(f);
             } else {
                 stream.addListener('drain', f);
