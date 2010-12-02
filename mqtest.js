@@ -17,12 +17,16 @@ sToList = { aabba:true, bbccb:true, ccddc:true, ddeed:true, eeffe:true, ffggf:tr
 sMsgList = [ 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten' ];
 for (var a=0; a < sMsgList.length; ++a)
   sMsgList[a] = new Buffer(sMsgList[a]);
+sBig = new Buffer(1*1024*1024);
+for (var a=0; a < sBig.length; ++a)
+  sBig[a] = 'a';
 
 function Testconn(iId) {
   this.link = null;
   this.id = iId;
   this.open = false;
   this.data = {};
+  this.big = 0;
 }
 
 Testconn.prototype = {
@@ -41,15 +45,17 @@ Testconn.prototype = {
         var aT = Date.now() % 10;
         var aLink = that.link;
         setTimeout(function() {
-          if (that.link === aLink)
+          if (that.link === aLink && that.link.readyState === that.link.OPEN)
             that.link.send(makeMsg({op:'ack', type:'ok', id:aReq.id}));
         }, aT*10);
-        if (aBuf in that.data)
-          ++that.data[aBuf];
-        else
+        if (aBuf.length > 1024) {
+          if (++that.big % 10 === 0)
+            console.log(that.id+' got 10 big');
+        } else if (aBuf in that.data) {
+          if (++that.data[aBuf] % 10 === 0)
+            console.log(that.id+' got 10 '+aBuf);
+        } else
           that.data[aBuf] = 1;
-        if (that.data[aBuf] % 10 === 0)
-          console.log(that.id+' got 10 '+aBuf);
       } else if (aReq.op === 'ack') {
         that.ack[+aReq.id] = true;
       } else if (aReq.op === 'quit') {
@@ -66,38 +72,39 @@ Testconn.prototype = {
     var that = this;
     this.link.addListener('open', iCallback);
     this.link.addListener('data', function(buf) { that.recv(buf) });
-    this.link.addListener('close', function() { that.open = false; that.link = null; });
+    this.link.addListener('close', function() {
+      for (var a=0, aTot=0; a < that.ack.length; ++a)
+        if (that.ack[a]) ++aTot;
+      console.log(that.id+' '+aTot+' ackd');
+      that.open = false;
+      that.link = null;
+    });
     this.link.addListener('wserror', function(err) { throw err });
     this.ack = [];
     this.ack.length = sMsgList.length;
-  } ,
-
-  close: function() {
-    for (var a=0, aTot=0; a < this.ack.length; ++a)
-      if (this.ack[a]) ++aTot;
-    console.log(this.id+' '+aTot+' ackd');
-    this.open = false;
-    this.link.close();
-    this.link = null;
   }
 }
 
 function testLink(aC, iState) {
   switch (iState) {
   case 0:
-    aC.connect(function() {
-      aC.link.send(makeMsg({op:'login', nodeid:aC.id}));
-      setTimeout(testLink, (Date.now()%10)*1000, aC, iState+1);
-    });
+    if (aC.link)
+      setTimeout(testLink, (Date.now()%10)*500, aC, 0);
+    else
+      aC.connect(function() {
+        aC.link.send(makeMsg({op:'login', nodeid:aC.id}));
+        setTimeout(testLink, (Date.now()%10)*1000, aC, iState+1);
+      });
     break;
   case 1: case 2: case 3: case 4: case 5: case 6: case 7: case 8: case 9: case 10:
-    if (aC.link)
-      aC.link.send(makeMsg({op:'post', to:sToList, id:(iState-1).toString()}, sMsgList[iState-1]));
+    var aData = /*aC.id === 'jjkkj' && iState === 10 ? sBig :*/ sMsgList[iState-1];
+    if (aC.link && aC.link.readyState === aC.link.OPEN)
+      aC.link.send(makeMsg({op:'post', to:sToList, id:(iState-1).toString()}, aData));
     setTimeout(testLink, (Date.now()%10)*800, aC, aC.link ? iState+1 : 0);
     break;
   case 11:
     if (aC.link)
-      aC.close();
+      aC.link.close();
     setTimeout(testLink, (Date.now()%10)*800, aC, 0);
     break;
   }

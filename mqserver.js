@@ -6,7 +6,9 @@ var ws = require('./websocket-server/lib/ws/server');
 
 var sMainDir = 'mqstore/';
 var sTempDir = sMainDir+'temp/';
-var sMaxQuietSize = 100000;
+var sMsgCacheMax = 100000;
+var sQuietHoursMax = 28;
+var sQuietCleanPeriod = 20*1000;
 
 var sQueues = {}; // array objects indexed by nodeid
 var sActive = {}; // connections indexed by nodeid
@@ -15,6 +17,10 @@ var sShutdown = false;
 function main(argv) {
   try {
   fs.mkdirSync(sMainDir, 0700);
+  } catch (err) {
+    if (err.errno !== process.EEXIST) throw err;
+  }
+  try {
   fs.mkdirSync(sTempDir, 0700);
   } catch (err) {
     if (err.errno !== process.EEXIST) throw err;
@@ -122,25 +128,32 @@ function noop(err) { if (err) throw err; }
 var sLock = {
   rsrc: {},
 
-  set: function(iId, iFn) {
-    if (!this.rsrc[iId]) {
-      this.rsrc[iId] = {set:true};
+  read:  function(iId, iFn) { return this._lock(iId, iFn, 'read', 'write') } ,
+  write: function(iId, iFn) { return this._lock(iId, iFn, 'write', 'read') } ,
+
+  _lock: function(iId, iFn, iA, iB) {
+    if (!this.rsrc[iId])
+      this.rsrc[iId] = {};
+    if (!this.rsrc[iId][iB]) {
+      if (!this.rsrc[iId][iA])
+        this.rsrc[iId][iA] = 0;
+      ++this.rsrc[iId][iA];
       return true;
     }
-    if (!this.rsrc[iId].set)
-      return this.rsrc[iId].set = true;
-    if (!this.rsrc[iId].queue) {
+    if (!this.rsrc[iId].queue)
       this.rsrc[iId].queue = [];
-      this.rsrc[iId].next = 0;
-    }
     this.rsrc[iId].queue.push(iFn);
     return false;
   } ,
 
   free: function(iId) {
-    if (this.rsrc[iId].queue && this.rsrc[iId].next < this.rsrc[iId].queue.length) {
-      this.rsrc[iId].set = false;
-      this.rsrc[iId].queue[this.rsrc[iId].next++]();
+    var aType = this.rsrc[iId].read ? 'read' : 'write';
+    if (--this.rsrc[iId][aType] > 0)
+      return;
+    if (this.rsrc[iId].queue) {
+      for (var a=0; a < this.rsrc[iId].queue.length; ++a)
+        this.rsrc[iId].queue[a]();
+      delete this.rsrc[iId].queue;
     } else {
       delete this.rsrc[iId];
     }
@@ -151,35 +164,39 @@ function _sendNext(iNode, iN) {
   if (!(iNode in sActive))
     return;
   if (iN === undefined) {
-    for (iN=0; iN < sQueues[iNode].length && !sQueues[iNode][iN]; ++iN) {}
-    if (iN === sQueues[iNode].length)
+    if (sQueues[iNode].length === 0)
       return;
+    for (iN=0; sQueues[iNode][iN] === null; ++iN) {}
   }
   ++sQueues[iNode].tries;
-  if (!sQueues[iNode][iN].msg)
-    fs.readFile(getPath(iNode)+'/'+sQueues[iNode][iN].id, function(err, data) {
-      if (err) throw err;
-      sQueues[iNode].size += data.length;
-      sQueues[iNode][iN].msg = data;
-      if (!(iNode in sActive)) {
-        --sQueues[iNode].tries;
-        return;
-      }
-      sActive[iNode].conn.send(data);
-    });
-  else
-    sActive[iNode].conn.send(sQueues[iNode][iN].msg);
-  sQueues[iNode].timer = setTimeout(_sendNext, 60*1000, iNode, iN);
+  sMsgCache.get(iNode, sQueues[iNode][iN], function(msg) {
+    if (iNode in sActive)
+      sActive[iNode].conn.send(msg, function(type) {
+        if (type) console.log('start timer');
+        sQueues[iNode].timer = setTimeout(_sendNext, 10*1000, iNode, iN);
+      });
+    else
+      --sQueues[iNode].tries;
+  });
 }
 
-function _newQueue(iNode) {
-  var aQ = [];
-  aQ.timer = null;
-  aQ.tries = 0;
-  aQ.lastDelivery = 0;
-  aQ.size = 0;
-  aQ.quiet = null;
-  sQueues[iNode] = aQ;
+function _newQueue(iNode, ioArray) {
+  ioArray.sort();
+  for (var a=0; a < ioArray.length; ++a)
+    sMsgCache.link(a);
+  ioArray.timer = null;
+  ioArray.tries = 0;
+  ioArray.lastDelivery = 0;
+  ioArray.quiet = null;
+  sQueues[iNode] = ioArray;
+}
+
+function _deleteQueue(iNode) {
+  if (sQueues[iNode].length === 0)
+    fs.rmdir(getPath(iNode), noop);
+  for (var a=0; a < sQueues[iNode].length; ++a)
+    sMsgCache.unlink(sQueues[iNode][a]);
+  delete sQueues[iNode];
 }
 
 function startQueue(iNode) {
@@ -190,20 +207,15 @@ function startQueue(iNode) {
       _sendNext(iNode);
     return;
   }
-  if (!sLock.set(iNode, function(){startQueue(iNode)} ))
+  if (!sLock.read(iNode, function(){startQueue(iNode)} ))
     return;
   var aQ = sQueues[iNode] = { };
   fs.readdir(getPath(iNode), function(err, array) {
     if (err && err.errno !== process.ENOENT) throw err;
-    _newQueue(iNode);
-    if (err)
-      return;
-    array.sort();
-    for (var a=0; a < array.length; ++a)
-      sQueues[iNode].push({id:array[a]});
+    _newQueue(iNode, array || []);
     if (aQ.quiet)
       sQueues[iNode].quiet = aQ.quiet;
-    else
+    else if (sQueues[iNode].length)
       _sendNext(iNode);
     sLock.free(iNode);
   });
@@ -217,8 +229,8 @@ function stopQueue(iNode) {
   sQueues[iNode].quiet = sQuiet.append(iNode);
 }
 
-function queueItem(iNode, iId, iMsg, iCallback) {
-  if (!sLock.set(iNode, function(){queueItem(iNode, iId, iMsg, iCallback)}))
+function queueItem(iNode, iId, iCallback) {
+  if (!sLock.write(iNode, function(){queueItem(iNode, iId, iCallback)}))
     return;
   fs.mkdir(getSub(iNode), 0700, function(errSub) {
     if (errSub && errSub.errno !== process.EEXIST) throw errSub;
@@ -227,8 +239,8 @@ function queueItem(iNode, iId, iMsg, iCallback) {
       fs.link(sTempDir+iId, getPath(iNode)+'/'+iId, function(err) {
         if (err) throw err;
         if (iNode in sQueues) {
-          sQueues[iNode].push({id:iId, msg:iMsg});
-          sQueues[iNode].size += iMsg.length;
+          sQueues[iNode].push(iId);
+          sMsgCache.link(iId);
           if (sQueues[iNode].tries === 0)
             _sendNext(iNode);
         }
@@ -248,15 +260,13 @@ function queueItem(iNode, iId, iMsg, iCallback) {
 }
 
 function deQueueItem(iNode, iId) {
-  if (!(iNode in sQueues))
+  if (sQueues[iNode].length === 0)
     return;
-  for (var aN=0; aN < sQueues[iNode].length && (!sQueues[iNode][aN] || sQueues[iNode][aN].id < iId); ++aN) {}
-  if (iId < 0 || aN === sQueues[iNode].length)
-    throw 'ack id out of range';
-  if (sQueues[iNode][aN].id > iId || !sQueues[iNode][aN])
+  for (var aN=0; sQueues[iNode][aN] === null; ++aN) {}
+  if (sQueues[iNode][aN] !== iId)
     return;
   fs.unlink(getPath(iNode)+'/'+iId, noop);
-  sQueues[iNode].size -= sQueues[iNode][aN].msg.length;
+  sMsgCache.unlink(iId);
   sQueues[iNode][aN] = null;
   sQueues[iNode].tries = 0;
   sQueues[iNode].lastDelivery = Date.now();
@@ -270,48 +280,129 @@ function deQueueItem(iNode, iId) {
     sQueues[iNode].length = 0;
 }
 
+function LList() {
+  this.head = null;
+  this.tail = null;
+}
+
+LList.prototype = {
+  append: function(iObj) {
+    iObj._prev = this.tail;
+    iObj._next = null;
+    if (this.tail)
+      this.tail = this.tail._next = iObj;
+    else
+      this.head = this.tail = iObj;
+  } ,
+
+  remove: function(iItem) {
+    if (iItem._prev)
+      iItem._prev._next = iItem._next;
+    if (iItem._next)
+      iItem._next._prev = iItem._prev;
+    if (iItem === this.head)
+      this.head = iItem._next;
+    if (iItem === this.tail)
+      this.tail = iItem._prev;
+    delete iItem._prev;
+    delete iItem._next;
+  }
+}
+
 // Linked list of inactive queues
 var sQuiet = {
-  head: null,
-  tail: null,
-  size: 0,
+  list: new LList(),
+  timer: null,
 
   append: function(iNode) {
-    this.size += sQueues[iNode].size;
-    if (this.size > sMaxQuietSize)
-      process.nextTick(function() { sQuiet.clean() });
-    var aI = { prev:this.tail, next:null, node:iNode };
-    if (this.tail)
-      this.tail = this.tail.next = aI;
-    else
-      this.head = this.tail = aI;
+    var aI = { node:iNode, lastOn:Date.now() };
+    this.list.append(aI);
+    if (!this.timer)
+      this.timer = setTimeout(function(){sQuiet.clean()}, sQuietCleanPeriod);
     return aI;
   } ,
 
   remove: function(iItem) {
-    this.size -= sQueues[iItem.node].size;
-    if (iItem.prev)
-      iItem.prev.next = iItem.next;
-    if (iItem.next)
-      iItem.next.prev = iItem.prev;
-    if (iItem === this.head)
-      this.head = iItem.next;
-    if (iItem === this.tail)
-      this.tail = iItem.prev;
+    this.list.remove(iItem);
+    if (!this.list.head) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
   } ,
 
   clean: function() {
-    while (this.head && this.size >= sMaxQuietSize) {
-      if (sQueues[this.head.node].length === 0)
-        fs.rmdir(getPath(this.head.node), noop);
-      this.size -= sQueues[this.head.node].size;
-      delete sQueues[this.head.node];
-      this.head = this.head.next;
-      if (this.head)
-        this.head.prev = null;
+    var aCutoff = Date.now() - 15*1000; /// sQuietHoursMax * 60*60*1000;
+    while (this.list.head && this.list.head.lastOn < aCutoff) {
+      _deleteQueue(this.list.head.node);
+      this.list.remove(this.list.head);
     }
+    this.timer = setTimeout(function(){sQuiet.clean()}, sQuietCleanPeriod);
   }
 }; // sQuiet
+
+var sMsgCache = {
+  cache: {}, // indexed by file id
+  list: new LList(), // ordered by add order
+  size: 0,
+
+  get: function(iNode, iId, iCallback) {
+    if (this.cache[iId].msg) {
+      process.nextTick(function() { iCallback(sMsgCache.cache[iId].msg) });
+      return;
+    }
+    if (this.cache[iId].wait) {
+      this.cache[iId].wait[iNode] = iCallback;
+      return;
+    }
+    this.cache[iId].wait = {};
+    this.cache[iId].wait[iNode] = iCallback;
+    fs.readFile(getPath(iNode)+'/'+iId, function(err, data) {
+      if (err) throw err;
+      sMsgCache.put(iId, data);
+      for (var a in sMsgCache.cache[iId].wait)
+        sMsgCache.cache[iId].wait[a](data);
+      delete sMsgCache.cache[iId].wait;
+    });
+  } ,
+
+  put: function(iId, iMsg) {
+    if (iMsg.length > sMsgCacheMax/10)
+      return;
+    if (iId in this.cache)
+      this.cache[iId].msg = iMsg;
+    else
+      this.cache[iId] = { count:0, msg:iMsg };
+    this.list.append(this.cache[iId]);
+    this.size += iMsg.length;
+    if (this.size > sMsgCacheMax)
+      process.nextTick(function() { sMsgCache.clean() });
+  } ,
+
+  link: function(iId) {
+    if (iId in this.cache)
+      ++this.cache[iId].count;
+    else
+      this.cache[iId] = { count:1, msg:null };
+  } ,
+
+  unlink: function(iId) {
+    if (--this.cache[iId].count > 0)
+      return;
+    if (this.cache[iId].msg) {
+      this.size -= this.cache[iId].msg.length;
+      this.list.remove(this.cache[iId]);
+    }
+    delete this.cache[iId];
+  } ,
+
+  clean: function() {
+    while (this.list.head && this.size > sMsgCacheMax) {
+      this.size -= this.list.head.msg.length;
+      this.list.head.msg = null;
+      this.list.remove(this.list.head);
+    }
+  }
+};
 
 // Connection handler
 function Link(iConn) {
@@ -348,6 +439,9 @@ Link.prototype = {
         throw 'missing request param '+a;
     }
 
+    if (!this.conn)
+      throw 'message arrived on closed connection: '+JSON.stringify(iReq);
+
     var aBuf = iMsg.length > aJsEnd ? iMsg.slice(aJsEnd, iMsg.length) : null;
 
     this[aReq.op](aReq, aBuf);
@@ -374,18 +468,21 @@ Link.prototype = {
         return;
       }
       that._activate(iReq.nodeid, 'ok login');
-      startQueue(iReq.nodeid);
     });
   } ,
 
   _activate: function(iNode, iAck) {
+    if (iNode in sActive || sShutdown) {
+      this.conn.send(makeMsg({op:'quit', info:(sShutdown ? 'shutdown' : 'login already active')}));
+      this.conn.close();
+      return;
+    }
     clearTimeout(this.loginTimer);
     this.loginTimer = null;
     this.node = iNode;
     sActive[iNode] = this;
     this.conn.send(makeMsg({op:'info', info:iAck}));
-    if (sShutdown)
-      this.conn.close();
+    startQueue(iNode);
   } ,
 
   sLastId: 0,
@@ -420,6 +517,7 @@ Link.prototype = {
         fs.fsync(fd, function(err) {
           fs.close(fd);
           if (err) return aFail();
+          sMsgCache.put(aId, aMsg);
           var aToCount = 0;
           var aCb = function() {
             if (--aToCount > 0)
@@ -430,7 +528,7 @@ Link.prototype = {
           };
           for (var a in iReq.to) {
             ++aToCount;
-            queueItem(a, aId, aMsg, aCb);
+            queueItem(a, aId, aCb);
           }
         });
       });
@@ -445,6 +543,10 @@ Link.prototype = {
   } ,
 
   finalize: function() {
+    if (!this.conn) {
+      console.log('finalize called on finalized Link');
+      return;
+    }
     if (this.node) {
       stopQueue(this.node);
       delete sActive[this.node];
@@ -458,7 +560,10 @@ Link.prototype = {
 main(process.argv);
 
 function test() {
-  sToList = { aabba:true, bbccb:true, ccddc:true, ddeed:true, eeffe:true, ffggf:true, gghhg:true, hhiih:true, iijji:true, jjkkj:true };
+  sToList = {
+    aabba:true, bbccb:true, ccddc:true, ddeed:true, eeffe:true, ffggf:true, gghhg:true, hhiih:true, iijji:true, jjkkj:true,
+    abcde:true, bcdef:true, cdefg:true, defgh:true, efghi:true, fghij:true, ghijk:true, hijlk:true, ijlkm:true, jklmn:true
+  };
   sMsgList = [ 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten' ];
   for (var a=0; a < sMsgList.length; ++a)
     sMsgList[a] = new Buffer(sMsgList[a]);
@@ -468,6 +573,8 @@ function test() {
     this.id = iId;
     this.open = false;
     this.recv = {};
+    this.ack = [];
+    this.ack.length = sMsgList.length;
   }
 
   Testconn.prototype = {
@@ -488,15 +595,15 @@ function test() {
           setTimeout(function() {
             if (that.link === aLink)
               that.link.handleMessage(makeMsg({op:'ack', type:'ok', id:aReq.id}));
-          }, aT*10);
+          }, aT*5);
           if (aBuf in that.recv)
             ++that.recv[aBuf];
           else
             that.recv[aBuf] = 1;
-          if (that.recv[aBuf] % 10 === 0)
-            console.log(that.id+' got 10 '+aBuf);
+          if (that.recv[aBuf] % 20 === 0)
+            console.log(that.id+' got 20 '+aBuf);
         } else if (aReq.op === 'ack') {
-          that.ack[+aReq.id] = true;
+          ++that.ack[+aReq.id];
         } else
           console.log(sys.inspect(aReq));
       } else
@@ -506,14 +613,15 @@ function test() {
     connect: function() {
       this.open = true;
       this.link = new Link(this);
-      this.ack = [];
-      this.ack.length = sMsgList.length;
+      for (var a=0; a < this.ack.length; ++a)
+        this.ack[a] = 0;
     } ,
 
     close: function() {
-      for (var a=0, aTot=0; a < this.ack.length; ++a)
-        if (this.ack[a]) ++aTot;
-      console.log(this.id+' '+aTot+' ackd');
+      var aList = '';
+      for (var a=0; a < this.ack.length; ++a)
+        aList += ' '+a+':'+this.ack[a];
+      console.log(this.id+aList+' ackd');
       this.open = false;
       this.link.finalize();
       this.link = null;
@@ -527,26 +635,29 @@ function test() {
         break;
       aC.connect();
       aC.link.handleMessage(makeMsg({op:'login', nodeid:aC.id}));
-      setTimeout(testLink, (Date.now()%10)*1000, aC, iState+1);
+      setTimeout(testLink, (Date.now()%10)*907, aC, iState+1);
       break;
-    case 1: case 2: case 3: case 4: case 5: case 6: case 7: case 8: case 9: case 10:
+    case  1: case  2: case  3: case  4: case  5: case  6: case  7: case  8: case  9: case 10:
+    case 11: case 12: case 13: case 14: case 15: case 16: case 17: case 18: case 19: case 20:
       if (!aC.link)
         break;
-      var aMsg = makeMsg({op:'post', to:sToList, id:(iState-1).toString()}, sMsgList[iState-1]);
+      var aTo = {}, aN = Date.now()%20+1;
+      for (var a in sToList) { aTo[a] = sToList[a]; if (--aN === 0) break; }
+      var aMsg = makeMsg({op:'post', to:sToList, id:(iState%10).toString()}, sMsgList[iState%10]);
       aC.link.handleMessage(aMsg);
-      setTimeout(testLink, (Date.now()%10)*800, aC, iState+1);
+      setTimeout(testLink, (Date.now()%10)*807, aC, iState+1);
       break;
-    case 11:
+    case 21:
       if (sShutdown)
         break;
       aC.close();
-      setTimeout(testLink, (Date.now()%10)*800, aC, 0);
+      setTimeout(testLink, (Date.now()%30)*1007, aC, 0);
       break;
     }
   }
 
   for (var a in sToList) {
-    testLink(new Testconn(a), 0);
+    setTimeout(function(a){testLink(new Testconn(a), 0)}, 0, a);
   }
 }
 
