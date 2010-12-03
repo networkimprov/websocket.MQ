@@ -162,13 +162,12 @@ util.inherits(Connection, _events.EventEmitter);
 var write = function(connection, data, encoding) {
   if(connection._socket.writable){
     try {
-      connection._socket.write(data, encoding);
-      return true;
+      return connection._socket.write(data, encoding) ? 1 : 2;
     } catch(e){
       debug(null, "Error on write: "+e.toString());
     }
   }
-  return false;
+  return 0;
 };
 
 var close = function(connection) {
@@ -262,15 +261,27 @@ Connection.prototype.inspect = function(){
   return "<WS:Connection "+this.id+">";
 };
 
-Connection.prototype.write = function(data) {
+Connection.prototype.write = function(data, callback) {
   if(this._state === 4) {
     debug(this.id, "write: "+data);
 
+    var sent;
     if(
       write(this, "\x00", "binary") &&
       write(this, data, "utf8") &&
-      write(this, "\xff", "binary")
+      (sent = write(this, "\xff", "binary"))
     ) {
+      if (callback) {
+        if (sent === 1) {
+          process.nextTick(callback);
+        } else {
+          var self = this;
+          self._socket.on("drain", function f() { // should use once("drain", callback)
+            self._socket.removeListener("drain", f);
+            callback(true);
+          });
+        }
+      }
       return true;
     } else {
       debug(this.id, "\033[31mERROR: write: "+data);
@@ -278,6 +289,7 @@ Connection.prototype.write = function(data) {
   } else {
     debug(this.id, "\033[31mCouldn't send.");
   }
+  if (callback) process.nextTick(callback);
   return false;
 };
 
