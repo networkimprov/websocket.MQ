@@ -1,17 +1,6 @@
 
 var sys = require('sys');
-var WebSocket = require('./websocket-client').WebSocket;
-
-function makeMsg(iJso, iData) {
-  var aReq = JSON.stringify(iJso);
-  var aLen = (aReq.length.toString(16)+'   ').slice(0,4);
-  var aBuf = new Buffer(aLen.length + aReq.length + (iData ? iData.length : 0));
-  aBuf.write(aLen, 0);
-  aBuf.write(aReq, aLen.length);
-  if (iData)
-    iData.copy(aBuf, aLen.length + aReq.length, 0);
-  return aBuf;
-}
+var MqClient = require('./mqclient');
 
 sToList = { aabba:true, bbccb:true, ccddc:true, ddeed:true, eeffe:true, ffggf:true, gghhg:true, hhiih:true, iijji:true, jjkkj:true };
 sMsgList = [ 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten' ];
@@ -22,89 +11,62 @@ for (var a=0; a < sBig.length; ++a)
   sBig[a] = 'a';
 
 function Testconn(iId) {
-  this.link = null;
   this.id = iId;
-  this.open = false;
   this.data = {};
   this.big = 0;
-}
-
-Testconn.prototype = {
-  recv: function(iMsg) {
-    var that = this;
-    if (!that.open) {
-      console.log('on closed conn: '+iMsg);
-      return;
-    }
-    var aLen = iMsg.toString('ascii',0,4);
-    if (/^[0-9A-F]/.test(aLen)) {
-      var aJsEnd = parseInt(aLen, 16) +4;
-      var aReq = JSON.parse(iMsg.toString('ascii', 4, aJsEnd));
-      var aBuf = iMsg.length > aJsEnd ? iMsg.toString('ascii', aJsEnd,iMsg.length) : null;
-      if (aReq.op === 'deliver') {
-        var aT = Date.now() % 10;
-        var aLink = that.link;
-        setTimeout(function() {
-          if (that.link === aLink && that.link.readyState === that.link.OPEN)
-            that.link.send(makeMsg({op:'ack', type:'ok', id:aReq.id}));
-        }, aT*10);
-        if (aBuf.length > 1024) {
-          if (++that.big % 10 === 0)
-            console.log(that.id+' got 10 big');
-        } else if (aBuf in that.data) {
-          if (++that.data[aBuf] % 10 === 0)
-            console.log(that.id+' got 10 '+aBuf);
-        } else
-          that.data[aBuf] = 1;
-      } else if (aReq.op === 'ack') {
-        that.ack[+aReq.id] = true;
-      } else if (aReq.op === 'quit') {
-        console.log('quit, '+aReq.info);
-      } else
-        console.log(sys.inspect(aReq));
+  this.ack = [];
+  this.client = new MqClient();
+  this.client.on('info', function(msg) {
+    console.log(msg);
+  });
+  this.client.on('quit', function(msg) {
+    console.log('quit '+msg);
+  });
+  var that = this;
+  this.client.on('deliver', function(id, from, msg) {
+    setTimeout(function() {
+      if (that.client.isOpen())
+        that.client.ack(id, 'ok');
+    }, (Date.now()%10)*10);
+    if (msg.length > 1024) {
+      if (++that.big % 10 === 0)
+        console.log(that.id+' got 10 big');
+    } else if (msg in that.data) {
+      if (++that.data[msg] % 10 === 0)
+        console.log(that.id+' got 10 '+msg);
     } else
-      console.log(iMsg);
-  } ,
-
-  connect: function(iCallback) {
-    this.open = true;
-    this.link = new WebSocket('ws://localhost:8008/');
-    var that = this;
-    this.link.addListener('open', iCallback);
-    this.link.addListener('data', function(buf) { that.recv(buf) });
-    this.link.addListener('close', function() {
-      for (var a=0, aTot=0; a < that.ack.length; ++a)
-        if (that.ack[a]) ++aTot;
-      console.log(that.id+' '+aTot+' ackd');
-      that.open = false;
-      that.link = null;
-    });
-    this.link.addListener('wserror', function(err) { throw err });
-    this.ack = [];
-    this.ack.length = sMsgList.length;
-  }
+      that.data[msg] = 1;
+  });
+  this.client.on('ack', function(id) {
+    that.ack[+id] = true;
+  });
+  this.client.on('close', function() {
+    for (var a=0, aTot=0; a < that.ack.length; ++a)
+      if (that.ack[a]) ++aTot;
+    console.log(that.id+' '+aTot+' ackd');
+    that.ack.length = 0;
+  });
 }
 
 function testLink(aC, iState) {
   switch (iState) {
   case 0:
-    if (aC.link)
+    if (aC.client.ws)
       setTimeout(testLink, (Date.now()%10)*500, aC, 0);
     else
-      aC.connect(function() {
-        aC.link.send(makeMsg({op:'login', nodeid:aC.id}));
+      aC.client.connect('ws://localhost:8008/', function() {
+        aC.client.login(aC.id);
         setTimeout(testLink, (Date.now()%10)*1000, aC, iState+1);
       });
     break;
   case 1: case 2: case 3: case 4: case 5: case 6: case 7: case 8: case 9: case 10:
     var aData = /*aC.id === 'jjkkj' && iState === 10 ? sBig :*/ sMsgList[iState-1];
-    if (aC.link && aC.link.readyState === aC.link.OPEN)
-      aC.link.send(makeMsg({op:'post', to:sToList, id:(iState-1).toString()}, aData));
-    setTimeout(testLink, (Date.now()%10)*800, aC, aC.link ? iState+1 : 0);
+    if (aC.client.isOpen())
+      aC.client.post(sToList, aData, (iState-1).toString());
+    setTimeout(testLink, (Date.now()%10)*800, aC, aC.client.isOpen() ? iState+1 : 0);
     break;
   case 11:
-    if (aC.link)
-      aC.link.close();
+    aC.client.close();
     setTimeout(testLink, (Date.now()%10)*800, aC, 0);
     break;
   }
