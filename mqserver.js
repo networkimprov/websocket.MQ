@@ -183,7 +183,7 @@ function _sendNext(iNode, iN) {
 function _newQueue(iNode, ioArray) {
   ioArray.sort();
   for (var a=0; a < ioArray.length; ++a)
-    sMsgCache.link(a);
+    sMsgCache.link(ioArray[a]);
   ioArray.timer = null;
   ioArray.tries = 0;
   ioArray.lastDelivery = 0;
@@ -195,7 +195,8 @@ function _deleteQueue(iNode) {
   if (sQueues[iNode].length === 0)
     fs.rmdir(getPath(iNode), noop);
   for (var a=0; a < sQueues[iNode].length; ++a)
-    sMsgCache.unlink(sQueues[iNode][a]);
+    if (sQueues[iNode][a])
+      sMsgCache.unlink(sQueues[iNode][a]);
   delete sQueues[iNode];
 }
 
