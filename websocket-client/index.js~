@@ -405,7 +405,7 @@ var WebSocket = function(url, proto, opts) {
         get : function() { return readyState; }
     });
     Object.defineProperty(self, 'writeable', {
-        get : function() { return stream && stream.writable; }
+        get : function() { return stream.writable; }
     });
 
     // Connect and perform handshaking with the server

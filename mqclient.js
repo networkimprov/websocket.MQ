@@ -66,7 +66,7 @@ MqClient.prototype = {
   } ,
 
   isOpen: function() {
-    return this.ws !== null && this.ws.readyState === this.ws.OPEN;
+    return this.ws !== null && this.ws.readyState === this.ws.OPEN && this.ws.writeable;
   } ,
 
   register: function() {
