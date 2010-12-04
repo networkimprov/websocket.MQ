@@ -167,13 +167,14 @@ function _sendNext(iNode, iN) {
     if (sQueues[iNode].length === 0)
       return;
     for (iN=0; sQueues[iNode][iN] === null; ++iN) {}
-  }
+  }if (!sQueues[iNode][iN]) sys.debug('queue '+iNode+' n '+iN+' len '+sQueues[iNode].length+' '+sys.inspect(sQueues[iNode]));
   ++sQueues[iNode].tries;
   sMsgCache.get(iNode, sQueues[iNode][iN], function(msg) {
     if (iNode in sActive)
       sActive[iNode].conn.send(msg, function(type) {
         if (type) console.log('start timer');
-        sQueues[iNode].timer = setTimeout(_sendNext, 10*1000, iNode, iN);
+        if (iNode in sActive)
+          sQueues[iNode].timer = setTimeout(_sendNext, 10*1000, iNode, iN);
       });
     else
       --sQueues[iNode].tries;
@@ -181,6 +182,8 @@ function _sendNext(iNode, iN) {
 }
 
 function _newQueue(iNode, ioArray) {
+  if ('tries' in sQueues[iNode])
+    throw new Error('queue already exists');
   ioArray.sort();
   for (var a=0; a < ioArray.length; ++a)
     sMsgCache.link(ioArray[a]);
@@ -192,6 +195,8 @@ function _newQueue(iNode, ioArray) {
 }
 
 function _deleteQueue(iNode) {
+  if (sQueues[iNode].timer)
+    throw new Error('delete of active queue');
   if (sQueues[iNode].length === 0)
     fs.rmdir(getPath(iNode), noop);
   for (var a=0; a < sQueues[iNode].length; ++a)
@@ -346,7 +351,7 @@ var sMsgCache = {
   list: new LList(), // ordered by add order
   size: 0,
 
-  get: function(iNode, iId, iCallback) {
+  get: function(iNode, iId, iCallback) {if (!this.cache[iId]) sys.debug('cache id '+iId+' node '+iNode);
     if (this.cache[iId].msg) {
       process.nextTick(function() { iCallback(sMsgCache.cache[iId].msg) });
       return;
