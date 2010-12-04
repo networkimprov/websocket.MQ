@@ -60,7 +60,7 @@ function testLink(aC, iState) {
       });
     break;
   case 1: case 2: case 3: case 4: case 5: case 6: case 7: case 8: case 9: case 10:
-    var aData = /*aC.id === 'jjkkj' && iState === 10 ? sBig :*/ sMsgList[iState-1];
+    var aData = aC.id === 'jjkkj' && iState === 1 ? sBig : sMsgList[iState-1];
     if (aC.client.isOpen())
       aC.client.post(sToList, aData, (iState-1).toString());
     setTimeout(testLink, (Date.now()%10)*800, aC, aC.client.isOpen() ? iState+1 : 0);
