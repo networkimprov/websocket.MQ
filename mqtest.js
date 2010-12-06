@@ -16,13 +16,13 @@ function Testconn(iId) {
   this.big = 0;
   this.ack = [];
   this.client = new MqClient();
+  var that = this;
   this.client.on('info', function(msg) {
-    console.log(msg);
+    console.log(that.id+' '+msg);
   });
   this.client.on('quit', function(msg) {
-    console.log('quit '+msg);
+    console.log(that.id+' quit '+msg);
   });
-  var that = this;
   this.client.on('deliver', function(id, from, msg) {
     setTimeout(function() {
       if (that.client.isOpen())
@@ -32,8 +32,8 @@ function Testconn(iId) {
       if (++that.big % 10 === 0)
         console.log(that.id+' got 10 big');
     } else if (msg in that.data) {
-      if (++that.data[msg] % 10 === 0)
-        console.log(that.id+' got 10 '+msg);
+      if (++that.data[msg] % 100 === 0)
+        console.log(that.id+' got 100 '+msg);
     } else
       that.data[msg] = 1;
   });

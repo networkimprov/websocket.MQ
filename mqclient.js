@@ -53,10 +53,11 @@ MqClient.prototype = {
       that.ws = null;
     });
     this.ws.addListener('data', function(buf) {
-      unpackMsg(buf, that)
+      unpackMsg(buf, that);
     });
     this.ws.addListener('wserror', function(err) {
-      throw err
+      if (!that.ws.socketError) throw err;
+      console.log(that.ws.socketError);
     });
   } ,
 
