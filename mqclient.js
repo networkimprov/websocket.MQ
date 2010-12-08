@@ -30,7 +30,7 @@ function unpackMsg(iMsg, iClient) {
   var aBuf = iMsg.length > aJsEnd ? iMsg.toString('ascii', aJsEnd,iMsg.length) : null;
   switch (aReq.op) {
   case 'deliver': iClient['event_'+aReq.op](aReq.id, aReq.from, aBuf); break;
-  case 'ack':     iClient['event_'+aReq.op](aReq.id);         break;
+  case 'ack':     iClient['event_'+aReq.op](aReq.id, aReq.type);       break;
   case 'info':    iClient['event_'+aReq.op](aReq.info);       break;
   case 'quit':    iClient['event_'+aReq.op](aReq.info);       break;
   }

@@ -37,8 +37,11 @@ function Testconn(iId) {
     } else
       that.data[msg] = 1;
   });
-  this.client.on('ack', function(id) {
-    that.ack[+id] = true;
+  this.client.on('ack', function(id, type) {
+    if (type === 'fail')
+      console.log('ack fail '+id);
+    else
+      that.ack[+id] = true;
   });
   this.client.on('close', function() {
     for (var a=0, aTot=0; a < that.ack.length; ++a)
