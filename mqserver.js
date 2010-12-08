@@ -45,6 +45,7 @@ function main(argv) {
       try {
       process.kill(+aPid, 'SIGINT');
       } catch (err) {
+        console.log(err.message);
         fs.unlink(sMainDir+'.pid', noop);
       }
     } else {
@@ -65,6 +66,10 @@ function main(argv) {
         conn.send(makeMsg({op:'quit', info:err}));
         conn.close();
       }
+    });
+    conn.addListener("timeout", function() {
+      conn.send(makeMsg({op:'quit', info:'timeout'}));
+      conn.close();
     });
 
     conn.addListener("close", function(){
@@ -160,24 +165,21 @@ var sLock = {
   }
 };
 
-function _sendNext(iNode, iN) {
-  if (!(iNode in sActive))
+function _sendNext(iNode) {
+  if (!(iNode in sActive) || sQueues[iNode].length === 0)
     return;
-  if (iN === undefined) {
-    if (sQueues[iNode].length === 0)
-      return;
-    for (iN=0; sQueues[iNode][iN] === null; ++iN) {}
-  }if (!sQueues[iNode][iN]) sys.debug('queue '+iNode+' n '+iN+' len '+sQueues[iNode].length+' '+sys.inspect(sQueues[iNode]));
   ++sQueues[iNode].tries;
-  sMsgCache.get(iNode, sQueues[iNode][iN], function(msg) {
-    if (iNode in sActive)
+  var aN = sQueues[iNode].next;
+  if (!sQueues[iNode][aN]) sys.debug(sys.inspect(sQueues[iNode])+' queue '+iNode+' n '+aN+' len '+sQueues[iNode].length);
+  var aLn = sActive[iNode];
+  var aId = sQueues[iNode][aN];
+  sMsgCache.get(iNode, aId, function(msg) {
+    if (!msg && sQueues[iNode][aN] === aId) throw new Error('null msg for '+iNode+' '+aId);
+    if (sActive[iNode] === aLn && sQueues[iNode][aN] === aId)
       sActive[iNode].conn.send(msg, function(type) {
-        if (type) console.log('start timer');
-        if (iNode in sActive)
-          sQueues[iNode].timer = setTimeout(_sendNext, 10*1000, iNode, iN);
+        if (sActive[iNode] === aLn && sQueues[iNode][aN] === aId)
+          sQueues[iNode].timer = setTimeout(_sendNext, 10*1000, iNode);
       });
-    else
-      --sQueues[iNode].tries;
   });
 }
 
@@ -189,7 +191,7 @@ function _newQueue(iNode, ioArray) {
     sMsgCache.link(ioArray[a]);
   ioArray.timer = null;
   ioArray.tries = 0;
-  ioArray.lastDelivery = 0;
+  ioArray.next = 0;
   ioArray.quiet = null;
   sQueues[iNode] = ioArray;
 }
@@ -266,24 +268,20 @@ function queueItem(iNode, iId, iCallback) {
 }
 
 function deQueueItem(iNode, iId) {
-  if (sQueues[iNode].length === 0)
-    return;
-  for (var aN=0; sQueues[iNode][aN] === null; ++aN) {}
-  if (sQueues[iNode][aN] !== iId)
+  if (sQueues[iNode].length === 0 || sQueues[iNode][sQueues[iNode].next] !== iId)
     return;
   fs.unlink(getPath(iNode)+'/'+iId, noop);
   sMsgCache.unlink(iId);
-  sQueues[iNode][aN] = null;
+  sQueues[iNode][sQueues[iNode].next] = null;
   sQueues[iNode].tries = 0;
-  sQueues[iNode].lastDelivery = Date.now();
   if (sQueues[iNode].timer) {
     clearTimeout(sQueues[iNode].timer);
     sQueues[iNode].timer = null;
   }
-  if (aN+1 < sQueues[iNode].length)
-    _sendNext(iNode, aN+1);
+  if (++sQueues[iNode].next < sQueues[iNode].length)
+    _sendNext(iNode);
   else
-    sQueues[iNode].length = 0;
+    sQueues[iNode].next = sQueues[iNode].length = 0;
 }
 
 function LList() {
@@ -362,13 +360,29 @@ var sMsgCache = {
     }
     this.cache[iId].wait = {};
     this.cache[iId].wait[iNode] = iCallback;
-    fs.readFile(getPath(iNode)+'/'+iId, function(err, data) {
-      if (err) throw err;
-      sMsgCache.put(iId, data);
-      for (var a in sMsgCache.cache[iId].wait)
-        sMsgCache.cache[iId].wait[a](data);
-      delete sMsgCache.cache[iId].wait;
-    });
+    var aWait = this.cache[iId].wait;
+    function aRead(queue) {
+      fs.readFile(getPath(queue)+'/'+iId, function(err, data) {
+        if (err && err.errno !== process.ENOENT) throw err;
+        if (!(iId in sMsgCache.cache)) {
+          for (var a in aWait)
+            aWait[a](null);
+          return;
+        }
+        if (err) {
+          aWait[queue](null);
+          delete aWait[queue];
+          for (var a in aWait)
+            return aRead(a);
+        } else {
+          sMsgCache.put(iId, data);
+          for (var a in aWait)
+            aWait[a](data);
+        }
+        delete sMsgCache.cache[iId].wait;
+      });
+    }
+    aRead(iNode);
   } ,
 
   put: function(iId, iMsg) {
