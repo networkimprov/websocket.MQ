@@ -27,7 +27,7 @@ function unpackMsg(iMsg, iClient) {
     iClient.event_error(err.message);
     return;
   }
-  var aBuf = iMsg.length > aJsEnd ? iMsg.toString('ascii', aJsEnd,iMsg.length) : null;
+  var aBuf = iMsg.length > aJsEnd ? iMsg.slice(aJsEnd, iMsg.length) : null;
   switch (aReq.op) {
   case 'deliver': iClient['event_'+aReq.op](aReq.id, aReq.from, aBuf); break;
   case 'ack':     iClient['event_'+aReq.op](aReq.id, aReq.type);       break;
@@ -56,8 +56,9 @@ MqClient.prototype = {
       unpackMsg(buf, that);
     });
     this.ws.addListener('wserror', function(err) {
-      if (!that.ws.socketError) throw err;
-      console.log(that.ws.socketError);
+      if (that.ws && !that.ws.socketError) throw err;
+      console.log(err.message);
+      that.close();
     });
   } ,
 

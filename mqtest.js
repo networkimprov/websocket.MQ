@@ -4,8 +4,13 @@ var MqClient = require('./mqclient');
 
 sToList = { aabba:true, bbccb:true, ccddc:true, ddeed:true, eeffe:true, ffggf:true, gghhg:true, hhiih:true, iijji:true, jjkkj:true };
 sMsgList = [ 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten' ];
-for (var a=0; a < sMsgList.length; ++a)
-  sMsgList[a] = new Buffer(sMsgList[a]);
+for (var a=0; a < sMsgList.length; ++a) {
+  var aBuf = new Buffer(a*1001 || 3);
+  for (var ai=0; ai < aBuf.length; ++ai)
+    aBuf[ai] = 'b';
+  aBuf.write(sMsgList[a]);
+  sMsgList[a] = aBuf;
+}
 sBig = new Buffer(1*1024*1024);
 for (var a=0; a < sBig.length; ++a)
   sBig[a] = 'a';
@@ -28,14 +33,15 @@ function Testconn(iId) {
       if (that.client.isOpen())
         that.client.ack(id, 'ok');
     }, (Date.now()%10)*10);
-    if (msg.length > 1024) {
+    var aName = msg.toString('ascii', 0, Math.min(5, msg.length));
+    if (msg.length === sBig.length) {
       if (++that.big % 10 === 0)
         console.log(that.id+' got 10 big');
-    } else if (msg in that.data) {
-      if (++that.data[msg] % 100 === 0)
-        console.log(that.id+' got 100 '+msg);
+    } else if (aName in that.data) {
+      if (++that.data[aName] % 100 === 0)
+        console.log(that.id+' got 100 '+aName+' '+msg.length);
     } else
-      that.data[msg] = 1;
+      that.data[aName] = 1;
   });
   this.client.on('ack', function(id, type) {
     if (type === 'fail')
@@ -59,7 +65,7 @@ function testLink(aC, iState) {
     else
       aC.client.connect('ws://localhost:8008/', function() {
         aC.client.login(aC.id);
-        setTimeout(testLink, (Date.now()%10)*1000, aC, iState+1);
+        setTimeout(testLink, (Date.now()%10+1)*1000, aC, iState+1);
       });
     break;
   case 1: case 2: case 3: case 4: case 5: case 6: case 7: case 8: case 9: case 10:

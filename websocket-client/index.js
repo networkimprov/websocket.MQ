@@ -323,16 +323,17 @@ var WebSocket = function(url, proto, opts) {
     };
 
     // Handle errors from any source (HTTP client, stream, etc)
-    var socketError = null;
+    var socketError = false;
     var errorListener = function(e) {
         switch (e.errno) {
+        case process.ENOTCONN:
         case process.EPIPE:
         case process.ECONNRESET:
         case process.ECONNREFUSED:
-            socketError = e.message;
+            socketError = true;
             break;
         default:
-            socketError = null;
+            socketError = false;
         }
         process.nextTick(function() {
             self.emit('wserror', e);
@@ -350,7 +351,7 @@ var WebSocket = function(url, proto, opts) {
 
             if (stream) {
                 stream.end();
-                stream.destroy();
+                //stream.destroy();
                 stream = undefined;
             }
 
@@ -379,8 +380,8 @@ var WebSocket = function(url, proto, opts) {
             //      closer to the spirit of the API in that the caller
             //      never sees us transition directly to CLOSED. Instead, we
             //      just seem to have an infinitely fast closing handshake.
-            if (!stream.writable || stream.write('', 'binary')) {
-                if (!stream.writable) stream = undefined;
+            if (stream.writable && stream.write('\xff\x00', 'binary') || !stream.fd) {
+                if (!stream.fd) stream = undefined;
                 process.nextTick(f);
             } else {
                 stream.addListener('drain', f);
@@ -539,6 +540,7 @@ var WebSocket = function(url, proto, opts) {
                         httpClient.removeAllListeners('upgrade');
                         stream.removeAllListeners('data');
                         stream.addListener('data', dataListener);
+                        stream.addListener('end', self.close);
 
                         // Fire the 'open' event
                         process.nextTick(function() {
