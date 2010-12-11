@@ -14,8 +14,9 @@ As with email, each message is posted with a list of recipients. We don't track 
 On disk, messages are stored in separate files, within transient directories for each recipient.
 
 Components
-  mqserver.js - the server app. Creates an mqstore/ directory in the working directory.
-  mqclient.js - the client module.
+  mqlib.js - message queue module.
+  mqserver.js - example app with websocket server. Creates an mqstore/ directory in the working directory.
+  mqclient.js - client module connecting via websocket client.
   mqtest.js - test client. Creates 10 clients which connect/send/disconnect.
   websocket-server - patched module from https://github.com/miksago/node-websocket-server
   websocket-client - patched module from https://github.com/pgriess/node-websocket-client
@@ -39,5 +40,4 @@ Todo
   Browser-compatible client library
   SSL
   Email gateway with SMTP client and LMTP server
-  Modulize to enable access via socket.IO, etc
 
