@@ -482,8 +482,7 @@ Link.prototype = {
   post: function(iReq, iBuf) {
     if (!this.node)
       throw 'illegal op on unauthenticated socket';
-    var aName = false;
-    for (aName in iReq.to) break;
+    for (var aName in iReq.to) break;
     if (!aName)
       throw 'missing to members';
     var that = this;
@@ -492,7 +491,7 @@ Link.prototype = {
         that.conn.send(makeMsg({op:'ack', type:'fail', id:iReq.id}));
     };
     var aId = this._makeId();
-    var aMsg = makeMsg({op:'deliver', id:aId, from:that.node}, iBuf);
+    var aMsg = makeMsg({op:'deliver', id:aId, from:that.node, etc:iReq.etc}, iBuf);
     fs.open(sTempDir+aId, 'w', 0600, function(err, fd) {
       if (err) return aFail();
       writeAll(fd, aMsg, function(err) { // attempt write to temp

@@ -29,7 +29,7 @@ function unpackMsg(iMsg, iClient) {
   }
   var aBuf = iMsg.length > aJsEnd ? iMsg.slice(aJsEnd, iMsg.length) : null;
   switch (aReq.op) {
-  case 'deliver': iClient['event_'+aReq.op](aReq.id, aReq.from, aBuf); break;
+  case 'deliver': iClient['event_'+aReq.op](aReq.id, aReq.from, aBuf, aReq.etc); break;
   case 'ack':     iClient['event_'+aReq.op](aReq.id, aReq.type);       break;
   case 'info':    iClient['event_'+aReq.op](aReq.info);       break;
   case 'quit':    iClient['event_'+aReq.op](aReq.info);       break;
@@ -79,8 +79,8 @@ MqClient.prototype = {
     this.ws.send(aMsg);
   } ,
 
-  post: function(iToList, iMsg, iId) {
-    var aMsg = packMsg({op:'post', to:iToList, id:iId}, iMsg);
+  post: function(iToList, iMsg, iId, iEtc) {
+    var aMsg = packMsg({op:'post', to:iToList, id:iId, etc:iEtc}, iMsg);
     this.ws.send(aMsg);
   } ,
 
