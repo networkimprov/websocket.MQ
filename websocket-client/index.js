@@ -323,17 +323,18 @@ var WebSocket = function(url, proto, opts) {
     };
 
     // Handle errors from any source (HTTP client, stream, etc)
-    var socketError = false;
+    var socketError = 0;
     var errorListener = function(e) {
         switch (e.errno) {
         case process.ENOTCONN:
         case process.EPIPE:
         case process.ECONNRESET:
         case process.ECONNREFUSED:
-            socketError = true;
+        case process.EAGAIN:
+            socketError = e.errno;
             break;
         default:
-            socketError = false;
+            socketError = 0;
         }
         process.nextTick(function() {
             self.emit('wserror', e);
