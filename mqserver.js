@@ -4,7 +4,7 @@
 var sys = require('sys');
 var fs = require('fs');
 
-var mq = require('./mqlib.js');
+var mq = require('./mqlib');
 var ws = require('./websocket-server/lib/ws/server');
 
 var sMqStore = 'mqstore';
@@ -53,7 +53,7 @@ function main(argv) {
     return;
   }
 
-  mq.init(sMqStore);
+  mq.init(sMqStore, new RegDb('mqreg'));
 
   var aServer = ws.createServer();
 
@@ -81,6 +81,73 @@ function main(argv) {
   });
 
   aServer.listen(8008);
+}
+
+var uuid = require('./uuidjs');
+
+function RegDb(iFileName) {
+  this.file = iFileName;
+  try {
+  var aData = fs.readFileSync(this.file, 'ascii');
+  } catch (err) {
+    if (err.errno !== process.ENOENT) throw err;
+  }
+  this.db = aData ? JSON.parse(aData) : { uid:{}, alias:{} };
+}
+
+RegDb.prototype = {
+
+  register: function(iUid, iAliases, iCallback, iReReg) {
+    var aHas = iUid in this.db.uid;
+    if (!iReReg && aHas || iReReg && !aHas) {
+      process.nextTick(function() {
+        iCallback(new Error(aHas ? 'user exists' : 'no such user'));
+      });
+      return;
+    }
+    if (aHas && iAliases && this.db.uid[iUid].aliases)
+      for (var a=0; a < this.db.uid[iUid].aliases.length; ++a)
+        delete this.db.alias[this.db.uid[iUid].aliases[a]];
+    if (!aHas)
+      this.db.uid[iUid] = {};
+    if (iAliases) {
+      var aList = iAliases.split(/\s+/);
+      var aReject = '';
+      for (var a=aList.length-1; a >= 0; --a) {
+        if (aList[a].length === 0 || aList[a] in this.db.alias)
+          aReject += (aList[a].length ? ' ' : '') + aList.splice(a, 1)[0];
+        else
+          this.db.alias[aList[a]] = iUid;
+      }
+      this.db.uid[iUid].aliases = aList;
+    }
+    if (!aHas || !iAliases)
+      this.db.uid[iUid].password = uuid.generate();
+    var that = this;
+    fs.writeFile(this.file, JSON.stringify(this.db), 'ascii', function(err) {
+      if (err) throw err;
+      iCallback(null, { password:that.db.uid[iUid].password, reject:aReject });
+    });
+  } ,
+
+  reregister: function(iUid, iAliases, iCallback) {
+    module.exports.register(iUid, iAliases, iCallback, true);
+  } ,
+
+  verify: function(iUid, iPassword, iCallback) {
+    var that = this;
+    process.nextTick(function() {
+      iCallback(null, iUid in that.db.uid && that.db.uid[iUid].password === iPassword);
+    });
+  } ,
+
+  lookup: function(iAlias, iCallback) {
+    var that = this;
+    process.nextTick(function() {
+      var aEr = iAlias in that.db.alias ? null : new Error('alias not defined');
+      iCallback(aEr, that.db.alias[iAlias]);
+    });
+  }
 }
 
 main(process.argv);
