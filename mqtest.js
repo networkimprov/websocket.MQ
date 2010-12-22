@@ -15,26 +15,34 @@ sBig = new Buffer(1*1024*1024);
 for (var a=0; a < sBig.length; ++a)
   sBig[a] = 'a';
 
-function Testconn(iId) {
+function Testconn(iId, iPass) {
+  this.reg = iPass;
   this.id = iId;
   this.data = {};
   this.big = 0;
   this.ack = [];
   this.client = new MqClient();
   var that = this;
+  this.client.on('registered', function(password, reject) {
+    that.reg = password;
+    console.log(that.id+' registered '+password);
+  });
   this.client.on('info', function(msg) {
     console.log(that.id+' '+msg);
   });
   this.client.on('quit', function(msg) {
     console.log(that.id+' quit '+msg);
   });
-  this.client.on('deliver', function(id, from, msg) {
+  this.client.on('deliver', function(id, from, msg, etc) {
     setTimeout(function() {
       if (that.client.isOpen())
         that.client.ack(id, 'ok');
     }, (Date.now()%10)*10);
-    var aName = msg.toString('ascii', 0, Math.min(5, msg.length));
-    if (msg.length === sBig.length) {
+    if (msg)
+      var aName = msg.toString('ascii', 0, Math.min(5, msg.length));
+    if (etc) {
+      console.log(etc);
+    } else if (msg.length === sBig.length) {
       if (++that.big % 10 === 0)
         console.log(that.id+' got 10 big');
     } else if (aName in that.data) {
@@ -64,14 +72,20 @@ function testLink(aC, iState) {
       setTimeout(testLink, (Date.now()%10)*500, aC, 0);
     else
       aC.client.connect('ws://localhost:8008/', function() {
-        aC.client.login(aC.id);
-        setTimeout(testLink, (Date.now()%10+1)*1000, aC, iState+1);
+        if (aC.reg)
+          aC.client.login(aC.id, aC.reg);
+        else
+          aC.client.register(aC.id, 'alias'+aC.id);
+        setTimeout(testLink, (Date.now()%10+1)*1000, aC, aC.reg ? iState+1 : 11);
       });
     break;
   case 1: case 2: case 3: case 4: case 5: case 6: case 7: case 8: case 9: case 10:
     var aData = aC.id === 'jjkkj' && iState === 1 ? sBig : sMsgList[iState-1];
     if (aC.client.isOpen())
-      aC.client.post(sToList, aData, (iState-1).toString());
+      if (aC.id === 'jjkkj' && iState === 2)
+        aC.client.ping('aliasiijji', (iState-1).toString(), 'pingmsg');
+      else
+        aC.client.post(sToList, aData, (iState-1).toString());
     setTimeout(testLink, (Date.now()%10)*800, aC, aC.client.isOpen() ? iState+1 : 0);
     break;
   case 11:
@@ -81,7 +95,15 @@ function testLink(aC, iState) {
   }
 }
 
+var fs = require('fs');
+try {
+var sPw = fs.readFileSync('mqreg', 'ascii');
+} catch (err) {
+  if (err.errno !== process.ENOENT) throw err;
+}
+sPw = sPw ? JSON.parse(sPw).uid : null;
+
 for (var a in sToList) {
-  testLink(new Testconn(a), 0);
+  testLink(new Testconn(a, sPw && sPw[a].password), 0);
 }
 
