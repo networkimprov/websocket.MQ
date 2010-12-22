@@ -29,10 +29,11 @@ function unpackMsg(iMsg, iClient) {
   }
   var aBuf = iMsg.length > aJsEnd ? iMsg.slice(aJsEnd, iMsg.length) : null;
   switch (aReq.op) {
-  case 'deliver': iClient['event_'+aReq.op](aReq.id, aReq.from, aBuf, aReq.etc); break;
-  case 'ack':     iClient['event_'+aReq.op](aReq.id, aReq.type);       break;
-  case 'info':    iClient['event_'+aReq.op](aReq.info);       break;
-  case 'quit':    iClient['event_'+aReq.op](aReq.info);       break;
+  case 'registered': iClient['event_'+aReq.op](aReq.password, aReq.reject);         break;
+  case 'deliver':    iClient['event_'+aReq.op](aReq.id, aReq.from, aBuf, aReq.etc); break;
+  case 'ack':        iClient['event_'+aReq.op](aReq.id, aReq.type);                 break;
+  case 'info':       iClient['event_'+aReq.op](aReq.info);                          break;
+  case 'quit':       iClient['event_'+aReq.op](aReq.info);                          break;
   }
 }
 
@@ -40,6 +41,8 @@ function MqClient() {
   this.ws = null;
   this.event_error = function(msg) { throw new Error(msg) };
 }
+
+MqClient.packMsg = packMsg;
 
 MqClient.prototype = {
 
@@ -71,11 +74,13 @@ MqClient.prototype = {
     return this.ws !== null && this.ws.readyState === this.ws.OPEN && this.ws.writeable;
   } ,
 
-  register: function() {
+  register: function(iNode, iAliases) {
+    var aMsg = packMsg({op:'register', nodeid:iNode, aliases:iAliases});
+    this.ws.send(aMsg);
   } ,
 
-  login: function(iNode) {
-    var aMsg = packMsg({op:'login', nodeid:iNode});
+  login: function(iNode, iPass) {
+    var aMsg = packMsg({op:'login', nodeid:iNode, password:iPass});
     this.ws.send(aMsg);
   } ,
 
@@ -84,9 +89,18 @@ MqClient.prototype = {
     this.ws.send(aMsg);
   } ,
 
+  ping: function(iAlias, iId, iEtc) {
+    var aMsg = packMsg({op:'ping', alias:iAlias, id:iId, etc:iEtc});
+    this.ws.send(aMsg);
+  } ,
+
   ack: function(iId, iType) {
     var aMsg = packMsg({op:'ack', id:iId, type:iType});
     this.ws.send(aMsg);
+  } ,
+
+  send: function(iPackedMsg) {
+    this.ws.send(iPackedMsg);
   } ,
 
   on: function(iEvt, iFn) {

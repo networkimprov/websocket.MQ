@@ -2,6 +2,7 @@
 var sys = require('sys');
 var fs = require('fs');
 
+var sRegSvc;
 var sMainDir;
 var sTempDir;
 var sMsgCacheMax = 100000;
@@ -12,9 +13,10 @@ var sQueues = {}; // array objects indexed by nodeid
 var sActive = {}; // connections indexed by nodeid
 var sShutdown = false;
 
-module.exports.init = function(iMainDir) {
+module.exports.init = function(iMainDir, iRegSvc) {
   sMainDir = iMainDir+'/';
   sTempDir = sMainDir+'temp/';
+  sRegSvc = iRegSvc;
 
   try {
   fs.mkdirSync(sMainDir, 0700);
@@ -150,7 +152,9 @@ function _deleteQueue(iNode) {
   if (sQueues[iNode].timer)
     throw new Error('delete of active queue');
   if (sQueues[iNode].length === 0)
-    fs.rmdir(getPath(iNode), noop);
+    fs.rmdir(getPath(iNode), function(err) {
+      if (err && err.errno !== process.ENOENT) throw err;
+    });
   for (var a=0; a < sQueues[iNode].length; ++a)
     if (sQueues[iNode][a])
       sMsgCache.unlink(sQueues[iNode][a]);
@@ -393,9 +397,10 @@ function Link(iConn) {
 Link.prototype = {
 
   params: {
-    register: { nodeid:'string' },
-    login:    { nodeid:'string' },
+    register: { nodeid:'string', aliases:'string' },
+    login:    { nodeid:'string', password:'string' },
     post:     { to:'object', id:'string' },
+    ping:     { alias:'string', id:'string' },
     ack:      { type:'string', id:'string' }
   } ,
 
@@ -419,6 +424,9 @@ Link.prototype = {
         throw 'missing request param '+a;
     }
 
+    if (aReq.op !== 'post' && iMsg.length > aJsEnd)
+      throw 'message body disallowed for '+aReq.op;
+
     var aBuf = iMsg.length > aJsEnd ? iMsg.slice(aJsEnd, iMsg.length) : null;
 
     this[aReq.op](aReq, aBuf);
@@ -437,15 +445,25 @@ Link.prototype = {
   } ,
 
   register: function(iReq) {
-    this._activate(iReq.nodeid, 'ok register');
+    var that = this;
+    sRegSvc[this.node ? 'reregister' : 'register'](iReq.nodeid, iReq.aliases, function(err, data) {
+      if (!that.conn)
+        return;
+      if (err) {
+        that.conn.send(makeMsg({op:'info', info:'reg fail: '+err.message}));
+        return;
+      }
+      data.op = 'registered';
+      that.conn.send(makeMsg(data));
+    });
   } ,
 
   login: function(iReq) {
     var that = this;
-    process.nextTick(function(err) { // validate
+    sRegSvc.verify(iReq.nodeid, iReq.password, function(err, ok) {
       if (!that.conn)
         return;
-      if (err) {
+      if (err || !ok) {
         that.conn.send(makeMsg({op:'quit', info:'invalid login'}));
         that.conn.close();
         return;
@@ -514,6 +532,23 @@ Link.prototype = {
           }
         });
       });
+    });
+  } ,
+
+  ping: function(iReq) {
+    if (!this.node)
+      throw 'illegal op on unauthenticated socket';
+    var that = this;
+    sRegSvc.lookup(iReq.alias, function(err, node) {
+      if (err) {
+        if (that.conn)
+          that.conn.send(makeMsg({op:'ack', type:'fail', id:iReq.id}));
+        return;
+      }
+      delete iReq.alias;
+      iReq.to = {};
+      iReq.to[node] = true;
+      that.post(iReq, null);
     });
   } ,
 
