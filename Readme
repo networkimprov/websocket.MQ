@@ -26,9 +26,9 @@ Dependencies
   Node.js 0.2.x https://github.com/ry/node
 
 Usage
-  $ node mqserver &    # run server in background
-  $ node mqtest        # run test client; stop with ctl-C
-  $ node mqserver stop # stop server
+  $ node mqserver.js &    # run server in background
+  $ node mqtest.js        # run test client; stop with ctl-C
+  $ node mqserver.js stop # stop server
 
 Message format
   f0f {"op":"type" ...}data
