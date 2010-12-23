@@ -397,7 +397,7 @@ function Link(iConn) {
 Link.prototype = {
 
   params: {
-    register: { nodeid:'string', aliases:'string' },
+    register: { nodeid:'string', password:'string', aliases:'string' },
     login:    { nodeid:'string', password:'string' },
     post:     { to:'object', id:'string' },
     ping:     { alias:'string', id:'string' },
@@ -446,15 +446,14 @@ Link.prototype = {
 
   register: function(iReq) {
     var that = this;
-    sRegSvc[this.node ? 'reregister' : 'register'](iReq.nodeid, iReq.aliases, function(err, data) {
+    sRegSvc[this.node ? 'reregister' : 'register'](iReq.nodeid, iReq.password, iReq.aliases, function(err, aliases) {
       if (!that.conn)
         return;
       if (err) {
         that.conn.send(makeMsg({op:'info', info:'reg fail: '+err.message}));
         return;
       }
-      data.op = 'registered';
-      that.conn.send(makeMsg(data));
+      that.conn.send(makeMsg({op:'registered', aliases:aliases}));
     });
   } ,
 

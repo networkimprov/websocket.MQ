@@ -29,7 +29,7 @@ function unpackMsg(iMsg, iClient) {
   }
   var aBuf = iMsg.length > aJsEnd ? iMsg.slice(aJsEnd, iMsg.length) : null;
   switch (aReq.op) {
-  case 'registered': iClient['event_'+aReq.op](aReq.password, aReq.reject);         break;
+  case 'registered': iClient['event_'+aReq.op](aReq.aliases);                       break;
   case 'deliver':    iClient['event_'+aReq.op](aReq.id, aReq.from, aBuf, aReq.etc); break;
   case 'ack':        iClient['event_'+aReq.op](aReq.id, aReq.type);                 break;
   case 'info':       iClient['event_'+aReq.op](aReq.info);                          break;
@@ -74,8 +74,8 @@ MqClient.prototype = {
     return this.ws !== null && this.ws.readyState === this.ws.OPEN && this.ws.writeable;
   } ,
 
-  register: function(iNode, iAliases) {
-    var aMsg = packMsg({op:'register', nodeid:iNode, aliases:iAliases});
+  register: function(iNode, iPassword, iAliases) {
+    var aMsg = packMsg({op:'register', nodeid:iNode, password:iPassword, aliases:iAliases});
     this.ws.send(aMsg);
   } ,
 

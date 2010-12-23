@@ -20,7 +20,6 @@ Components
   mqtest.js - test client. Creates 10 clients which connect/send/disconnect.
   websocket-server - patched module from https://github.com/miksago/node-websocket-server
   websocket-client - patched module from https://github.com/pgriess/node-websocket-client
-  uuidjs - x86 linux binary of libuuid binding from https://github.com/weaver/uuidjs
 
 Dependencies
   Node.js 0.2.x https://github.com/ry/node

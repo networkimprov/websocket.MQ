@@ -15,17 +15,17 @@ sBig = new Buffer(1*1024*1024);
 for (var a=0; a < sBig.length; ++a)
   sBig[a] = 'a';
 
-function Testconn(iId, iPass) {
-  this.reg = iPass;
+function Testconn(iId, iReg) {
+  this.reg = iReg;
   this.id = iId;
   this.data = {};
   this.big = 0;
   this.ack = [];
   this.client = new MqClient();
   var that = this;
-  this.client.on('registered', function(password, reject) {
-    that.reg = password;
-    console.log(that.id+' registered '+password);
+  this.client.on('registered', function(aliases) {
+    that.reg = true;
+    console.log(that.id+' registered '+aliases);
   });
   this.client.on('info', function(msg) {
     console.log(that.id+' '+msg);
@@ -73,9 +73,9 @@ function testLink(aC, iState) {
     else
       aC.client.connect('ws://localhost:8008/', function() {
         if (aC.reg)
-          aC.client.login(aC.id, aC.reg);
+          aC.client.login(aC.id, 'password');
         else
-          aC.client.register(aC.id, 'alias'+aC.id);
+          aC.client.register(aC.id, 'password', 'alias'+aC.id);
         setTimeout(testLink, (Date.now()%10+1)*1000, aC, aC.reg ? iState+1 : 11);
       });
     break;
@@ -95,15 +95,13 @@ function testLink(aC, iState) {
   }
 }
 
-var fs = require('fs');
 try {
-var sPw = fs.readFileSync('mqreg', 'ascii');
+var sPw = require('fs').statSync('mqreg');
 } catch (err) {
   if (err.errno !== process.ENOENT) throw err;
 }
-sPw = sPw ? JSON.parse(sPw).uid : null;
 
 for (var a in sToList) {
-  testLink(new Testconn(a, sPw && sPw[a].password), 0);
+  testLink(new Testconn(a, !!sPw), 0);
 }
 

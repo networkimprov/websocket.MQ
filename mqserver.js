@@ -83,8 +83,6 @@ function main(argv) {
   aServer.listen(8008);
 }
 
-var uuid = require('./uuidjs');
-
 function RegDb(iFileName) {
   this.file = iFileName;
   try {
@@ -97,12 +95,14 @@ function RegDb(iFileName) {
 
 RegDb.prototype = {
 
-  register: function(iUid, iAliases, iCallback, iReReg) {
+  register: function(iUid, iPassword, iAliases, iCallback, iReReg) {
     var aHas = iUid in this.db.uid;
-    if (!iReReg && aHas || iReReg && !aHas) {
-      process.nextTick(function() {
-        iCallback(new Error(aHas ? 'user exists' : 'no such user'));
-      });
+    if (!iReReg && aHas || iReReg && !aHas)
+      var aErr = aHas ? 'user exists' : 'no such user';
+    else if (!aHas && !iPassword)
+      var aErr = 'password required';
+    if (aErr) {
+      process.nextTick(function() { iCallback(new Error(aErr)) });
       return;
     }
     if (aHas && iAliases && this.db.uid[iUid].aliases)
@@ -110,28 +110,27 @@ RegDb.prototype = {
         delete this.db.alias[this.db.uid[iUid].aliases[a]];
     if (!aHas)
       this.db.uid[iUid] = {};
+    if (iPassword)
+      this.db.uid[iUid].password = iPassword;
     if (iAliases) {
-      var aList = iAliases.split(/\s+/);
-      var aReject = '';
-      for (var a=aList.length-1; a >= 0; --a) {
-        if (aList[a].length === 0 || aList[a] in this.db.alias)
-          aReject += (aList[a].length ? ' ' : '') + aList.splice(a, 1)[0];
+      var aAccept = iAliases.split(/\s+/);
+      for (var a=aAccept.length-1; a >= 0; --a) {
+        if (aAccept[a].length === 0 || aAccept[a] in this.db.alias)
+          aAccept.splice(a, 1);
         else
-          this.db.alias[aList[a]] = iUid;
+          this.db.alias[aAccept[a]] = iUid;
       }
-      this.db.uid[iUid].aliases = aList;
+      this.db.uid[iUid].aliases = aAccept;
     }
-    if (!aHas || !iAliases)
-      this.db.uid[iUid].password = uuid.generate();
     var that = this;
     fs.writeFile(this.file, JSON.stringify(this.db), 'ascii', function(err) {
       if (err) throw err;
-      iCallback(null, { password:that.db.uid[iUid].password, reject:aReject });
+      iCallback(null, aAccept && aAccept.join(' '));
     });
   } ,
 
-  reregister: function(iUid, iAliases, iCallback) {
-    module.exports.register(iUid, iAliases, iCallback, true);
+  reregister: function(iUid, iPassword, iAliases, iCallback) {
+    module.exports.register(iUid, iPassword, iAliases, iCallback, true);
   } ,
 
   verify: function(iUid, iPassword, iCallback) {
