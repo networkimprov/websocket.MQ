@@ -130,7 +130,7 @@ RegDb.prototype = {
   } ,
 
   reregister: function(iUid, iPassword, iAliases, iCallback) {
-    module.exports.register(iUid, iPassword, iAliases, iCallback, true);
+    this.register(iUid, iPassword, iAliases, iCallback, true);
   } ,
 
   verify: function(iUid, iPassword, iCallback) {
