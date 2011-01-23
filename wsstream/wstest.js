@@ -3,19 +3,20 @@ var net = require('net');
 var sys = require('sys');
 var WsStream = require('./wsstream');
 
-if (process.argv.length > 2)
-  runClient(process.argv[2])
+var sSide = process.argv.length > 2 ? 'client' : 'server';
+if (sSide === 'client')
+  runClient()
 else
   runServer();
 
-function checkMsg(iFrame, iMsg, iSide, iCount) {
+function checkMsg(iFrame, iMsg, iCount) {
   if (iFrame.opcode !== 'binary' || !iFrame.isFinal || iFrame.size !== iMsg.length)
     throw new Error('bad frame '+sys.inspect(iFrame));
   var aTail = iMsg.toString('ascii', iMsg.length-11);
   if (aTail !== ' badgirl!  ')
     throw new Error('msg corrupted: '+aTail);
   if (iCount % 1000 === 0)
-    console.log(iSide+' '+iCount+' m '+iMsg.length);
+    console.log(sSide+' '+iCount+' m '+iMsg.length);
 }
 
 function handleErr(iErr) {
@@ -25,7 +26,7 @@ function handleErr(iErr) {
   case process.EPIPE:
   case process.EAGAIN:
   case process.ECONNREFUSED:
-    console.log(iErr.message);
+    console.log(iErr.message+' '+sSide);
     break;
   default:
     throw iErr;
@@ -51,8 +52,8 @@ function runServer() {
 
     var aCount = 0;
     aWs.on('data', function(frame, msg) {
-      checkMsg(frame, msg, 'server', ++aCount);
-      if (aClosing) {
+      checkMsg(frame, msg, ++aCount);
+      if (aClosing && socket.writable) {
         aWs.end();
         return;
       }
@@ -62,8 +63,8 @@ function runServer() {
       aWs.write(1, 'binary', aBuf);
     });
 
-    aWs.on('end', function() {
-      console.log('server got end');
+    aWs.on('end', function(ok) {
+      console.log('server got end '+ok);
     });
   });
 
@@ -78,7 +79,7 @@ function runServer() {
 }
 
 
-function runClient(x) {
+function runClient() {
   var aStr = 'here is the test string for starters. badgirl!  ';
   //var sBuf = new Buffer(16383);
   //for (var a=0; a < sBuf.length; a+=aStr.length)
@@ -106,7 +107,7 @@ function runClient(x) {
 
   var aCount = 0;
   aWsc.on('data', function(frame, msg) {
-    checkMsg(frame, msg, 'client', ++aCount);
+    checkMsg(frame, msg, ++aCount);
     aWsc.write(1, 'binary', msg);
     if (aCount % 1727 === 0)
       aWsc.write(1, 'binary', msg, function(ok) {
@@ -114,10 +115,11 @@ function runClient(x) {
       });
   });
 
-  aWsc.on('end', function() {
-    console.log('client got end');
-    aWsc.end();
+  aWsc.on('end', function(ok) {
+    console.log('client got end '+ok);
   });
+
+  process.on('SIGINT', function(){});
 
   aClient.connect(8009);
 }

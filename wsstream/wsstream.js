@@ -25,12 +25,16 @@ function WsStream(iSocket) {
   });
 
   this.socket.on('end', function() {
-    if (that.inBufs.length)
-      throw new Error('dangling buffers after "end" event');
     if (that.event_end)
-      that.event_end();
-    //if (!that.socket.writable && that.event_close)
-    //  that.event_close(false);
+      that.event_end(!that.socket.writable);
+    if (that.socket.writable) // close frame not received
+      that.socket.end();
+    else if (that.inBufs.length)
+      throw new Error('dangling buffers after "end" event');
+    that.framelen = 0;
+    that.frame = null;
+    that.inBufs.length = 0;
+    that.inLen = 0;
   });
 }
 
@@ -42,6 +46,8 @@ WsStream.prototype = {
   write: function(iFinal, iOp, iBuf, iCallback) {
     if (!(iOp in sOpCode))
       throw new Error('invalid opcode: '+iOp);
+    if (iOp === 'close')
+      throw new Error('invoke .end() to close WsStream');
     if (!this.socket.writable) {
       if (iCallback)
         process.nextTick(function() { iCallback(false) });
@@ -99,7 +105,7 @@ WsStream.prototype = {
       if (a < this.inBufs[0].length) {
         ++a;
         this.framelen = 0;
-        this.frame = { isFinal: this.framebuf[0] & 0x80, opcode: sOpCodeA[this.framebuf[0] & 0x0F], size: 0 };
+        this.frame = { isFinal: !!(this.framebuf[0] & 0x80), opcode: sOpCodeA[this.framebuf[0] & 0x0F], size: 0 };
         switch (aLen) {
         case 0x7E:
           this.frame.size = this.framebuf[2] << 8 | this.framebuf[3];
@@ -110,6 +116,10 @@ WsStream.prototype = {
           break;
         default:
           this.frame.size = aLen;
+        }
+        if (this.frame.size === 0) {
+          this._postData(null);
+          this.frame = null;
         }
       }
       this.inLen -= a;
@@ -136,15 +146,26 @@ WsStream.prototype = {
       }
     }
     this.inLen -= this.frame.size;
-    if (this.event_data)
-      this.event_data(this.frame, aBuf);
+    this._postData(aBuf);
     this.frame = null;
     if (this.inBufs.length)
       this._read();
   } ,
 
+  _postData: function(iBuf) {
+    if (this.frame.opcode === 'close') {
+      if (this.socket.writable)
+        this.end();
+    } else
+      if (this.event_data)
+        this.event_data(this.frame, iBuf);
+  } ,
+
   end: function() {
-    this.socket.end();
+    if (!this.socket.writable)
+      throw new Error('WsStream already ended');
+    var aBuf = new Buffer([ 0x80 | sOpCode['close'], 0 ]);
+    this.socket.end(aBuf);
     //if (!this.socket.readable && this.event_close)
     //  this.event_close(false);
   } ,
