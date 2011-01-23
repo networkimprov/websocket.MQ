@@ -128,7 +128,7 @@ function _sendNext(iNode) {
   sMsgCache.get(iNode, aId, function(msg) {
     if (!msg && sQueues[iNode][aN] === aId) throw new Error('null msg for '+iNode+' '+aId);
     if (sActive[iNode] === aLn && sQueues[iNode][aN] === aId)
-      sActive[iNode].conn.send(msg, function(type) {
+      sActive[iNode].conn.write(1, 'binary', msg, function(type) {
         if (sActive[iNode] === aLn && sQueues[iNode][aN] === aId)
           sQueues[iNode].timer = setTimeout(_sendNext, 10*1000, iNode);
       });
@@ -434,13 +434,13 @@ Link.prototype = {
     } catch (err) {
       if (!this.conn)
         return;
-      this.conn.send(makeMsg({op:'quit', info:err.message || err}));
+      this.conn.write(1, 'binary', makeMsg({op:'quit', info:err.message || err}));
       this.conn.close();
     }
   } ,
 
   timeout: function() {
-    this.conn.send(makeMsg({op:'quit', info:'close timeout'}));
+    this.conn.write(1, 'binary', makeMsg({op:'quit', info:'close timeout'}));
     this.conn.close();
   } ,
 
@@ -450,10 +450,10 @@ Link.prototype = {
       if (!that.conn)
         return;
       if (err) {
-        that.conn.send(makeMsg({op:'info', info:'reg fail: '+err.message}));
+        that.conn.write(1, 'binary', makeMsg({op:'info', info:'reg fail: '+err.message}));
         return;
       }
-      that.conn.send(makeMsg({op:'registered', aliases:aliases}));
+      that.conn.write(1, 'binary', makeMsg({op:'registered', aliases:aliases}));
     });
   } ,
 
@@ -463,7 +463,7 @@ Link.prototype = {
       if (!that.conn)
         return;
       if (err || !ok) {
-        that.conn.send(makeMsg({op:'quit', info:'invalid login'}));
+        that.conn.write(1, 'binary', makeMsg({op:'quit', info:'invalid login'}));
         that.conn.close();
         return;
       }
@@ -473,7 +473,7 @@ Link.prototype = {
 
   _activate: function(iNode, iAck) {
     if (iNode in sActive || sShutdown) {
-      this.conn.send(makeMsg({op:'quit', info:(sShutdown ? 'shutdown' : 'login already active')}));
+      this.conn.write(1, 'binary', makeMsg({op:'quit', info:(sShutdown ? 'shutdown' : 'login already active')}));
       this.conn.close();
       return;
     }
@@ -481,7 +481,7 @@ Link.prototype = {
     this.loginTimer = null;
     this.node = iNode;
     sActive[iNode] = this;
-    this.conn.send(makeMsg({op:'info', info:iAck}));
+    this.conn.write(1, 'binary', makeMsg({op:'info', info:iAck}));
     startQueue(iNode);
   } ,
 
@@ -505,7 +505,7 @@ Link.prototype = {
     var that = this;
     var aFail = function() {
       if (that.conn)
-        that.conn.send(makeMsg({op:'ack', type:'fail', id:iReq.id}));
+        that.conn.write(1, 'binary', makeMsg({op:'ack', type:'fail', id:iReq.id}));
     };
     var aId = this._makeId();
     var aMsg = makeMsg({op:'deliver', id:aId, from:that.node, etc:iReq.etc}, iBuf);
@@ -522,7 +522,7 @@ Link.prototype = {
             if (--aToCount > 0)
               return;
             if (that.conn)
-              that.conn.send(makeMsg({op:'ack', type:'ok', id:iReq.id}));
+              that.conn.write(1, 'binary', makeMsg({op:'ack', type:'ok', id:iReq.id}));
             fs.unlink(sTempDir+aId, noop);
           };
           for (var a in iReq.to) {
@@ -541,7 +541,7 @@ Link.prototype = {
     sRegSvc.lookup(iReq.alias, function(err, node) {
       if (err) {
         if (that.conn)
-          that.conn.send(makeMsg({op:'ack', type:'fail', id:iReq.id}));
+          that.conn.write(1, 'binary', makeMsg({op:'ack', type:'fail', id:iReq.id}));
         return;
       }
       delete iReq.alias;

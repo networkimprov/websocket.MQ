@@ -16,6 +16,7 @@ for (var a=0; a < sBig.length; ++a)
   sBig[a] = 'a';
 
 function Testconn(iId, iReg) {
+  this.open = false;
   this.reg = iReg;
   this.id = iId;
   this.data = {};
@@ -57,7 +58,12 @@ function Testconn(iId, iReg) {
     else
       that.ack[+id] = true;
   });
+  this.client.on('end', function(ok) {
+    if (!ok)
+      console.log('client got abrupt close');
+  });
   this.client.on('close', function() {
+    that.open = false;
     for (var a=0, aTot=0; a < that.ack.length; ++a)
       if (that.ack[a]) ++aTot;
     console.log(that.id+' '+aTot+' ackd');
@@ -68,10 +74,11 @@ function Testconn(iId, iReg) {
 function testLink(aC, iState) {
   switch (iState) {
   case 0:
-    if (aC.client.ws)
+    if (aC.open)
       setTimeout(testLink, (Date.now()%10)*500, aC, 0);
     else
-      aC.client.connect('ws://localhost:8008/', function() {
+      aC.client.connect('localhost', 8008, function() {
+        aC.open = true;
         if (aC.reg)
           aC.client.login(aC.id, 'password');
         else

@@ -3,12 +3,18 @@
 
 var sys = require('sys');
 var fs = require('fs');
+var net = require('net');
 
+var WsStream = require('./wsstream/wsstream');
 var mq = require('./mqlib');
-var ws = require('./websocket-server/lib/ws/server');
 
 var sMqStore = 'mqstore';
 var sPid = sMqStore+'/.pid';
+
+WsStream.prototype.close = function() {
+  this.end();
+  this.socket.destroy();
+};
 
 function noop(err) { if (err) throw err; }
 
@@ -55,21 +61,37 @@ function main(argv) {
 
   mq.init(sMqStore, new RegDb('mqreg'));
 
-  var aServer = ws.createServer();
+  var aServer = net.createServer(function(socket) {
+    socket.setNoDelay();
+    var aWs = new WsStream(socket);
+    var aLink = new mq.Link(aWs);
 
-  aServer.addListener("connection", function(conn) {
-    var aLink = new mq.Link(conn);
-
-    conn.addListener("message", function(msg) {
-      aLink.handleMessage(new Buffer(msg));
+    aWs.on('data', function(frame, msg) {
+      aLink.handleMessage(msg);
     });
 
-    conn.addListener("timeout", function() {
+    aWs.on('end', function(ok) {
+      if (!ok) console.log('server got abrupt close');
+    });
+
+    socket.on('timeout', function() {
       aLink.timeout();
     });
 
-    conn.addListener("close", function() {
+    socket.on('close', function() {
       aLink.finalize();
+    });
+
+    socket.on('error', function(err) {
+      switch(err.errno) {
+      case process.ENOTCONN:
+      case process.ECONNRESET:
+      case process.EPIPE:
+        console.log('server '+err.message);
+        break;
+      default:
+        throw err;
+      }
     });
   });
 
