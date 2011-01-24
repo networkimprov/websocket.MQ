@@ -3,7 +3,8 @@
 // supports callbacks to write
 // todo:
 //   allow write of a Stream
-//   Websocket handshaking
+//   HTTP handshaking
+//   client message masking
 
 module.exports = WsStream;
 
