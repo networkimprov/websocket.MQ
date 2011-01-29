@@ -18,8 +18,7 @@ Components
   mqserver.js - example app with websocket server. Creates an mqstore/ directory in the working directory.
   mqclient.js - client module connecting via websocket client.
   mqtest.js - test client. Creates 10 clients which connect/send/disconnect.
-  websocket-server - patched module from https://github.com/miksago/node-websocket-server
-  websocket-client - patched module from https://github.com/pgriess/node-websocket-client
+  wsstream - websocket stream module
 
 Dependencies
   Node.js 0.2.x https://github.com/ry/node
