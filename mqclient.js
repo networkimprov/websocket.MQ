@@ -104,6 +104,11 @@ MqClient.prototype = {
     this.ws.write(1, 'binary', aMsg);
   } ,
 
+  listEdit: function(iTo, iType, iMember, iId, iEtc, iMsg) {
+    var aMsg = packMsg({op:'listEdit', to:iTo, type:iType, member:iMember, id:iId, etc:iEtc}, iMsg);
+    this.ws.write(1, 'binary', aMsg);
+  } ,
+
   post: function(iToList, iMsg, iId, iEtc) {
     var aMsg = packMsg({op:'post', to:iToList, id:iId, etc:iEtc}, iMsg);
     this.ws.write(1, 'binary', aMsg);

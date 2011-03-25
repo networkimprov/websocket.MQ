@@ -1,7 +1,7 @@
 
 websocket.MQ
 
-Copyright 2010 by Liam Breck, Menlo Park, California
+Copyright 2011 by Liam Breck, Menlo Park, California
 License http://www.gnu.org/licenses/agpl-3.0.html
 
 https://github.com/networkimprov/websocket.MQ
@@ -10,7 +10,9 @@ A reliable message queue service for websocket-connected clients.
 The initial goal is to enable messaging among Node.js instances on the public net.
 Clients' connections are assumed to be potentially unreliable.
 
-As with email, each message is posted with a list of recipients. We don't track subscriptions.
+As with email, each message is posted with a list of recipients.
+A user may have multiple aliases; a single user may be sent a short message via an alias.
+Distribution lists are supported.
 On disk, messages are stored in separate files, within transient directories for each recipient.
 
 Components
@@ -32,15 +34,15 @@ Message format
   f0f {"op":"type" ...}data
   1-4 hex digits, padded with 0-3 spaces, giving the size of the JSON metadata object
   JSON metadata
-  arbitrary size text data
+  arbitrary size 8-bit data
 
 Message op types
-  To server: register, login, post, ack
-  To client: info, quit, deliver, ack
+  To server: register, login, listEdit, post, ping, ack
+  To client: registered, info, quit, deliver, ack
 
 Todo
   Implement user registration with email confirmation
-  Validate login against user database
+  SQLite-based user database
   Browser-compatible client library
   SSL
   Email gateway with SMTP client and LMTP server

@@ -112,7 +112,7 @@ function RegDb(iFileName) {
   } catch (err) {
     if (err.errno !== process.ENOENT) throw err;
   }
-  this.db = aData ? JSON.parse(aData) : { uid:{}, alias:{} };
+  this.db = aData ? JSON.parse(aData) : { uid:{}, alias:{}, list:{} };
 }
 
 RegDb.prototype = {
@@ -145,8 +145,8 @@ RegDb.prototype = {
       this.db.uid[iUid].aliases = aAccept;
     }
     var that = this;
-    fs.writeFile(this.file, JSON.stringify(this.db), 'ascii', function(err) {
-      if (err) throw err;
+    fs.writeFileSync(this.file, JSON.stringify(this.db), 'ascii');
+    process.nextTick(function() {
       iCallback(null, aAccept && aAccept.join(' '));
     });
   } ,
@@ -168,7 +168,75 @@ RegDb.prototype = {
       var aEr = iAlias in that.db.alias ? null : new Error('alias not defined');
       iCallback(aEr, that.db.alias[iAlias]);
     });
+  } ,
+
+  listAdd:    function(iName, iBy, iMember, iCallback) { this._listMod('ad', iName, iBy, iMember, iCallback); } ,
+  listRemove: function(iName, iBy, iMember, iCallback) { this._listMod('rm', iName, iBy, iMember, iCallback); } ,
+  //listRenew:  function(iName, iBy, iMember, iCallback) { this._listMod('nw', iName, iBy, iMember, iCallback); } ,
+
+  _listMod: function(iOp, iName, iBy, iMember, iCallback) {
+    var aHasB, aHasM, aHasL = iName in this.db.list;
+    if (iOp === 'rm') {
+      aHasB = aHasL && iBy in this.db.list[iName];
+      aHasM = aHasL && iMember in this.db.list[iName];
+    } else {
+      aHasB = iBy in (aHasL ? this.db.list[iName] : this.db.uid);
+      aHasM = iMember in this.db.uid;
+      aHasL = true;
+    } /*else if (iOp === 'nw') {
+      for (var a in iMember) {
+        if (!(a in this.db.uid)) {
+          iMember = a;
+          break;
+        }
+        iMember[a] = 1;
+      }
+      var aHasM = a && iMember !== a;
+    }*/
+
+    if (!aHasL || !aHasB || !aHasM) {
+      process.nextTick(function() {
+        var aEr = (!aHasL ? 'list '+iName : 'uid '+ (!aHasB ? 'by '+iBy : 'member '+iMember)) +' not found';
+        iCallback(new Error(aEr));
+      });
+      return;
+    }
+    switch (iOp) {
+    case 'ad':
+      if (!this.db.list[iName])
+        this.db.list[iName] = {};
+      this.db.list[iName][iBy] = 1;
+      this.db.list[iName][iMember] = 1;
+      break;
+    case 'rm':
+      delete this.db.list[iName][iMember];
+      for (var any in this.db.list[iName]) break;
+      if (!any) delete this.db.list[iName];
+      break;
+    /*case 'nw':
+      this.db.list[iName] = iMember;
+      this.db.list[iName][iBy] = 1;
+      break;*/
+    }
+    fs.writeFileSync(this.file, JSON.stringify(this.db), 'ascii');
+    process.nextTick(iCallback);
+  } ,
+
+  listLookup: function(iName, iBy, iCallback) {
+    var aHasL = iName in this.db.list;
+    var aHasB = aHasL && iBy in this.db.list[iName];
+    if (!aHasL || !aHasB) {
+      process.nextTick(function() {
+        iCallback(new Error((!aHasL ? 'list '+iName : 'uid '+iBy) +' not found'), iName);
+      });
+      return;
+    }
+    var aList = this.db.list[iName];
+    process.nextTick(function() {
+      iCallback(null, iName, aList);
+    });
   }
+
 }
 
 main(process.argv);

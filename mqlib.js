@@ -389,7 +389,7 @@ function Link(iConn) {
   this.loginTimer = setTimeout(function(that) {
     that.loginTimer = null;
     that.timeout();
-  }, 2000, this);
+  }, 4000, this);
   this.conn = iConn;
   this.node = null;
 }
@@ -399,9 +399,11 @@ Link.prototype = {
   params: {
     register: { nodeid:'string', password:'string', aliases:'string' },
     login:    { nodeid:'string', password:'string' },
-    post:     { to:'object', id:'string' },
-    ping:     { alias:'string', id:'string' },
-    ack:      { type:'string', id:'string' }
+    listEdit: { id:'string', to:'string', type:'string', member:'string' },
+    //listRenew:{ id:'string', to:'string', list:'object' },
+    post:     { id:'string', to:'object' },
+    ping:     { id:'string', alias:'string' },
+    ack:      { id:'string', type:'string' }
   } ,
 
   handleMessage: function(iMsg) {
@@ -419,17 +421,20 @@ Link.prototype = {
     if (typeof aReq.op !== 'string' || typeof this.params[aReq.op] === 'undefined')
       throw 'invalid request op';
 
+    if (aReq.op !== 'register' && aReq.op !== 'login' && !this.node)
+      throw 'illegal op on unauthenticated socket';
+
     for (var a in this.params[aReq.op]) {
       if (typeof aReq[a] !== this.params[aReq.op][a])
         throw 'missing request param '+a;
     }
 
-    if (aReq.op !== 'post' && iMsg.length > aJsEnd)
+    if (aReq.op !== 'post' && aReq.op !== 'listEdit' && iMsg.length > aJsEnd)
       throw 'message body disallowed for '+aReq.op;
 
     var aBuf = iMsg.length > aJsEnd ? iMsg.slice(aJsEnd, iMsg.length) : null;
 
-    this[aReq.op](aReq, aBuf);
+    this['handle_'+aReq.op](aReq, aBuf);
 
     } catch (err) {
       if (!this.conn)
@@ -444,7 +449,7 @@ Link.prototype = {
     this.conn.close();
   } ,
 
-  register: function(iReq) {
+  handle_register: function(iReq) {
     var that = this;
     sRegSvc[this.node ? 'reregister' : 'register'](iReq.nodeid, iReq.password, iReq.aliases, function(err, aliases) {
       if (!that.conn)
@@ -457,7 +462,7 @@ Link.prototype = {
     });
   } ,
 
-  login: function(iReq) {
+  handle_login: function(iReq) {
     var that = this;
     sRegSvc.verify(iReq.nodeid, iReq.password, function(err, ok) {
       if (!that.conn)
@@ -485,6 +490,37 @@ Link.prototype = {
     startQueue(iNode);
   } ,
 
+  handle_listEdit: function(iReq, iBuf) {
+    switch (iReq.type) {
+    case 'add':    sRegSvc.listAdd(iReq.to, this.node, iReq.member, aComplete); break;
+    case 'remove': sRegSvc.listRemove(iReq.to, this.node, iReq.member, aComplete); break;
+    default:       aComplete(new Error('invalid listEdit type: '+iReq.type));
+    }
+    var that = this;
+    function aComplete(err) {
+      if (err) {
+        if (that.conn) {
+          that.conn.write(1, 'binary', makeMsg({op:'quit', info:err.message}));
+          that.conn.close();
+        }
+        return;
+      }
+      if (iReq.etc || iBuf) {
+        var aTo = {};
+        aTo[iReq.to] = 3;
+        that.handle_post({id:iReq.id, to:aTo, etc:iReq.etc}, iBuf);
+      } else {
+        if (that.conn)
+          that.conn.write(1, 'binary', makeMsg({op:'ack', type:'ok', id:iReq.id}));
+      }
+    }
+  } ,
+
+  _ackFail: function(iId, iErr) {
+    if (this.conn)
+      this.conn.write(1, 'binary', makeMsg({op:'ack', type:'error: '+iErr.message, id:iId}));
+  } ,
+
   sLastId: 0,
   sLastSubId: 0,
   _makeId: function() {
@@ -496,64 +532,83 @@ Link.prototype = {
     return aId.toString();
   } ,
 
-  post: function(iReq, iBuf) {
-    if (!this.node)
-      throw 'illegal op on unauthenticated socket';
+  handle_post: function(iReq, iBuf) {
     for (var aName in iReq.to) break;
     if (!aName)
       throw 'missing to members';
     var that = this;
-    var aFail = function() {
-      if (that.conn)
-        that.conn.write(1, 'binary', makeMsg({op:'ack', type:'fail', id:iReq.id}));
-    };
+    var aCbErr, aCbCount = 0;
+    for (var a in iReq.to) {
+      iReq.to[a] = +iReq.to[a];
+      if (iReq.to[a] === NaN || iReq.to[a] < 2 || iReq.to[a] > 3)
+        continue;
+      ++aCbCount;
+      sRegSvc.listLookup(a, that.node, aSend);
+    }
+    if (aCbCount === 0)
+      that._postSend(iReq, iBuf);
+
+    function aSend(err, list, members) {
+      if (err) {
+        if (!aCbErr) aCbErr = err;
+        else aCbErr.message += ', '+err.message;
+      } else {
+        for (var a in members)
+          if (a !== that.node || iReq.to[list] === 3)
+            iReq.to[a] = members[a];
+      }
+      delete iReq.to[list];
+      if (--aCbCount > 0)
+        return;
+      if (aCbErr)
+        that._ackFail(iReq.id, aCbErr);
+      else
+        that._postSend(iReq, iBuf);
+    }
+  } ,
+
+  _postSend: function(iReq, iBuf) {
+    var that = this;
     var aId = this._makeId();
     var aMsg = makeMsg({op:'deliver', id:aId, from:that.node, etc:iReq.etc}, iBuf);
     fs.open(sTempDir+aId, 'w', 0600, function(err, fd) {
-      if (err) return aFail();
+      if (err) return that._ackFail(iReq.id, err);
       writeAll(fd, aMsg, function(err) { // attempt write to temp
-        if (err) { fs.close(fd); return aFail(); }
+        if (err) { fs.close(fd); return that._ackFail(iReq.id, err); }
         fs.fsync(fd, function(err) {
           fs.close(fd);
-          if (err) return aFail();
+          if (err) return that._ackFail(iReq.id, err);
           sMsgCache.put(aId, aMsg);
           var aToCount = 0;
-          var aCb = function() {
+          for (var a in iReq.to) {
+            ++aToCount;
+            queueItem(a, aId, aCb);
+          }
+          function aCb() {
             if (--aToCount > 0)
               return;
             if (that.conn)
               that.conn.write(1, 'binary', makeMsg({op:'ack', type:'ok', id:iReq.id}));
             fs.unlink(sTempDir+aId, noop);
-          };
-          for (var a in iReq.to) {
-            ++aToCount;
-            queueItem(a, aId, aCb);
           }
         });
       });
     });
   } ,
 
-  ping: function(iReq) {
-    if (!this.node)
-      throw 'illegal op on unauthenticated socket';
+  handle_ping: function(iReq) {
     var that = this;
     sRegSvc.lookup(iReq.alias, function(err, node) {
-      if (err) {
-        if (that.conn)
-          that.conn.write(1, 'binary', makeMsg({op:'ack', type:'fail', id:iReq.id}));
-        return;
-      }
+      if (err)
+        return that._ackFail(iReq.id, err);
       delete iReq.alias;
       iReq.to = {};
-      iReq.to[node] = true;
-      that.post(iReq, null);
+      iReq.to[node] = 1;
+      that._postSend(iReq, null);
     });
   } ,
 
-  ack: function(iReq) {
-    if (!this.node)
-      throw 'illegal op on unauthenticated socket';
+  handle_ack: function(iReq) {
     if (iReq.type === 'ok')
       deQueueItem(this.node, iReq.id);
   } ,

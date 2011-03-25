@@ -3,6 +3,7 @@ var sys = require('sys');
 var MqClient = require('./mqclient');
 
 sToList = { aabba:true, bbccb:true, ccddc:true, ddeed:true, eeffe:true, ffggf:true, gghhg:true, hhiih:true, iijji:true, jjkkj:true };
+var sListAgent, sListList = { thelist:2 };
 sMsgList = [ 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten' ];
 for (var a=0; a < sMsgList.length; ++a) {
   var aBuf = new Buffer(a*1001 || 3);
@@ -27,9 +28,21 @@ function Testconn(iId, iReg) {
   this.client.on('registered', function(aliases) {
     that.reg = true;
     console.log(that.id+' registered '+aliases);
+    that.client.login(that.id, 'password');
   });
   this.client.on('info', function(msg) {
     console.log(that.id+' '+msg);
+    if (sPw) return;
+    if (!sListAgent || that.id === sListAgent) {
+      sListAgent = that.id;
+      for (var aId in sToList)
+        if (sToList[aId] === true)
+          break;
+      if (sToList[aId] === true) {
+        sToList[aId] = 1;
+        that.client.listEdit('thelist', 'add', aId, 'list'+that.id, 'listEdit '+aId, null);
+      }
+    }
   });
   this.client.on('quit', function(msg) {
     console.log(that.id+' quit '+msg);
@@ -53,10 +66,11 @@ function Testconn(iId, iReg) {
       that.data[aName] = 1;
   });
   this.client.on('ack', function(id, type) {
-    if (type === 'fail')
-      console.log('ack fail '+id);
-    else
-      that.ack[+id] = true;
+    if (type === 'ok') {
+      if (!/^list/.test(id))
+        that.ack[+id] = true;
+    } else
+      console.log('ack fail '+type+' '+id);
   });
   this.client.on('end', function(ok) {
     if (!ok)
@@ -83,7 +97,7 @@ function testLink(aC, iState) {
           aC.client.login(aC.id, 'password');
         else
           aC.client.register(aC.id, 'password', 'alias'+aC.id);
-        setTimeout(testLink, (Date.now()%10+1)*1000, aC, aC.reg ? iState+1 : 11);
+        setTimeout(testLink, (Date.now()%10+1)*1000, aC, iState+1);
       });
     break;
   case 1: case 2: case 3: case 4: case 5: case 6: case 7: case 8: case 9: case 10:
@@ -92,7 +106,7 @@ function testLink(aC, iState) {
       if (aC.id === 'jjkkj' && iState === 2)
         aC.client.ping('aliasiijji', (iState-1).toString(), 'pingmsg');
       else
-        aC.client.post(sToList, aData, (iState-1).toString());
+        aC.client.post(aC.id === 'iijji' && iState === 9 ? sListList : sToList, aData, (iState-1).toString());
     setTimeout(testLink, (Date.now()%10)*800, aC, aC.client.isOpen() ? iState+1 : 0);
     break;
   case 11:
