@@ -4,6 +4,8 @@
 var sys = require('sys');
 var fs = require('fs');
 var net = require('net');
+var http = require('http');
+var url = require('url');
 
 var WsStream = require('./wsstream/wsstream');
 var mq = require('./mqlib');
@@ -59,7 +61,8 @@ function main(argv) {
     return;
   }
 
-  mq.init(sMqStore, new RegDb('mqreg'));
+  var aRegDb = new RegDb('mqreg');
+  mq.init(sMqStore, aRegDb);
 
   var aServer = net.createServer(function(socket) {
     socket.setNoDelay();
@@ -103,6 +106,36 @@ function main(argv) {
   });
 
   aServer.listen(8008);
+
+  var aHttp = http.createServer(function(req, res) {
+    if (req.method.toLowerCase() === 'post') {
+      var aUrl = url.parse(req.url, true);
+      var aOk = aRegDb.remove(aUrl.query.uid);
+      if (aOk) {
+        res.writeHead(303, {'Location':'/'});
+        res.end();
+      } else {
+        res.writeHead(200, {'Content-Type':'text/html'});
+        res.end('Not found');
+      }
+    } else {
+      var aSort = [];
+      for (var a in aRegDb.db.alias)
+        aSort.push(a);
+      aSort.sort();
+      var aHtml = '<html><head><title>websocket.MQ User Database</title></head><body>\
+                   <h3>websocket.MQ User Database</h3>';
+      var aLine = '<div><form method="POST" action="/delete?uid=_uidvalue">\
+                   <b>_alias</b> _uidvalue <input type="submit" value="Delete"></form></div>';
+      for (var a=0; a < aSort.length; ++a) {
+        aHtml += aLine.replace(/_uidvalue/g, aRegDb.db.alias[aSort[a]]).replace('_alias', aSort[a]);
+      }
+      aHtml += '</body></html>';
+      res.writeHead(200, {'Content-Type':'text/html'});
+      res.end(aHtml);
+    }
+  });
+  aHttp.listen(8080);
 }
 
 function RegDb(iFileName) {
@@ -153,6 +186,18 @@ RegDb.prototype = {
 
   reregister: function(iUid, iPassword, iAliases, iCallback) {
     this.register(iUid, iPassword, iAliases, iCallback, true);
+  } ,
+
+  remove: function(iUid) {
+    if (!iUid || !this.db.uid[iUid])
+      return false;
+    for (var a=0; a < this.db.uid[iUid].aliases.length; ++a)
+      delete this.db.alias[this.db.uid[iUid].aliases[a]];
+    for (var a in this.db.list)
+      delete this.db.list[a][iUid];
+    delete this.db.uid[iUid];
+    fs.writeFileSync(this.file, JSON.stringify(this.db), 'ascii');
+    return true;
   } ,
 
   verify: function(iUid, iPassword, iCallback) {
