@@ -28,6 +28,9 @@ function unpackMsg(iMsg) {
 function MqClient() {
   this.socket = new net.Stream;
   this.ws = new WsStream(this.socket);
+  this.host = null;
+  this.port = 0;
+
   var that = this;
   this.socket.on('connect', function() {
     that.socket.setNoDelay();
@@ -38,13 +41,20 @@ function MqClient() {
       that.event_close();
   });
   this.socket.on('error', function(err) {
+    var aTime = 60;
     switch(err.errno) {
-    case process.ENOTCONN:
     case process.ECONNRESET:
     case process.EPIPE:
+      aTime = 3;
+      // fall thru
     case process.EAGAIN:
     case process.ECONNREFUSED:
-      console.log('client '+err.message);///debugging
+      setTimeout(function() {
+        that.socket.connect(that.port, that.host);
+      }, aTime*1000);
+      // fall thru
+    case process.ENOTCONN:
+      console.log('mqclient '+err.message+(err.errno === process.ENOTCONN ? '' : '. retrying...'));///debugging
       break;
     default:
       that.event_error(err.message);
@@ -81,6 +91,8 @@ MqClient.prototype = {
   event_error: function(msg) { throw new Error(msg) } ,
 
   connect: function(iHost, iPort, iCallback) {
+    this.host = iHost;
+    this.port = iPort;
     this.on('connect', iCallback);
     this.socket.connect(iPort, iHost);
   } ,
