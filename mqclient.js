@@ -106,13 +106,13 @@ MqClient.prototype = {
     return this.socket.readable && this.socket.writable;
   } ,
 
-  register: function(iNode, iPassword, iAliases) {
-    var aMsg = packMsg({op:'register', nodeid:iNode, password:iPassword, aliases:iAliases});
+  register: function(iUid, iNewNode, iPrevNode, iAliases) {
+    var aMsg = packMsg({op:'register', userId:iUid, newNode:iNewNode, prevNode:iPrevNode, aliases:iAliases});
     this.ws.write(1, 'binary', aMsg);
   } ,
 
-  login: function(iNode, iPass) {
-    var aMsg = packMsg({op:'login', nodeid:iNode, password:iPass});
+  login: function(iUid, iNode) {
+    var aMsg = packMsg({op:'login', userId:iUid, nodeId:iNode});
     this.ws.write(1, 'binary', aMsg);
   } ,
 

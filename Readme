@@ -6,12 +6,13 @@ License http://www.gnu.org/licenses/agpl-3.0.html
 
 https://github.com/networkimprov/websocket.MQ
 
-A reliable message queue service for websocket-connected clients.
+A reliable message queue service for socket-connected clients.
 The initial goal is to enable messaging among Node.js instances on the public net.
 Clients' connections are assumed to be potentially unreliable.
 
 As with email, each message is posted with a list of recipients.
 A user may have multiple aliases; a single user may be sent a short message via an alias.
+A user may have multiple client "nodes"; messages are queued for all nodes.
 Distribution lists are supported.
 On disk, messages are stored in separate files, within transient directories for each recipient.
 
@@ -23,7 +24,7 @@ Components
   wsstream - websocket stream module
 
 Dependencies
-  Node.js 0.2.x https://github.com/ry/node
+  Node.js 0.2.x https://github.com/joyent/node
 
 Usage
   $ node mqserver.js &    # run server in background
@@ -31,6 +32,7 @@ Usage
   $ node mqserver.js stop # stop server
 
 Message format
+  messages are delimited with websocket-style frames
   f0f {"op":"type" ...}data
   1-4 hex digits, padded with 0-3 spaces, giving the size of the JSON metadata object
   JSON metadata
@@ -42,8 +44,8 @@ Message op types
 
 Todo
   Implement user registration with email confirmation
-  SQLite-based user database
-  Browser-compatible client library
+  Redis(?) user database
+  Manage inactive nodes/users
   SSL
   Email gateway with SMTP client and LMTP server
 

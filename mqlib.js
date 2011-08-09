@@ -391,14 +391,15 @@ function Link(iConn) {
     that.timeout();
   }, 4000, this);
   this.conn = iConn;
+  this.uid = null;
   this.node = null;
 }
 
 Link.prototype = {
 
   params: {
-    register: { nodeid:'string', password:'string', aliases:'string' },
-    login:    { nodeid:'string', password:'string' },
+    register: { userId:'string', newNode:'string', prevNode:'string', aliases:'string' },
+    login:    { userId:'string', nodeId:'string' },
     listEdit: { id:'string', to:'string', type:'string', member:'string' },
     //listRenew:{ id:'string', to:'string', list:'object' },
     post:     { id:'string', to:'object' },
@@ -451,7 +452,7 @@ Link.prototype = {
 
   handle_register: function(iReq) {
     var that = this;
-    sRegSvc[this.node ? 'reregister' : 'register'](iReq.nodeid, iReq.password, iReq.aliases, function(err, aliases) {
+    sRegSvc[this.node ? 'reregister' : 'register'](iReq.userId, iReq.newNode, iReq.prevNode, iReq.aliases, function(err, aliases) {
       if (!that.conn)
         return;
       if (err) {
@@ -464,36 +465,32 @@ Link.prototype = {
 
   handle_login: function(iReq) {
     var that = this;
-    sRegSvc.verify(iReq.nodeid, iReq.password, function(err, ok) {
+    sRegSvc.verify(iReq.userId, iReq.nodeId, function(err, ok) {
       if (!that.conn)
         return;
-      if (err || !ok) {
-        that.conn.write(1, 'binary', makeMsg({op:'quit', info:'invalid login'}));
+      var aNode = iReq.userId+iReq.nodeId;
+      if      (err || !ok)       var aErr = 'invalid login';
+      else if (aNode in sActive) var aErr = 'node already active';
+      else if (sShutdown)        var aErr = 'shutdown';
+      if (aErr) {
+        that.conn.write(1, 'binary', makeMsg({op:'quit', info:aErr}));
         that.conn.close();
         return;
       }
-      that._activate(iReq.nodeid, 'ok login');
+      clearTimeout(that.loginTimer);
+      that.loginTimer = null;
+      that.uid = iReq.userId;
+      that.node = aNode;
+      sActive[aNode] = that;
+      that.conn.write(1, 'binary', makeMsg({op:'info', info:'ok login'}));
+      startQueue(aNode);
     });
-  } ,
-
-  _activate: function(iNode, iAck) {
-    if (iNode in sActive || sShutdown) {
-      this.conn.write(1, 'binary', makeMsg({op:'quit', info:(sShutdown ? 'shutdown' : 'login already active')}));
-      this.conn.close();
-      return;
-    }
-    clearTimeout(this.loginTimer);
-    this.loginTimer = null;
-    this.node = iNode;
-    sActive[iNode] = this;
-    this.conn.write(1, 'binary', makeMsg({op:'info', info:iAck}));
-    startQueue(iNode);
   } ,
 
   handle_listEdit: function(iReq, iBuf) {
     switch (iReq.type) {
-    case 'add':    sRegSvc.listAdd(iReq.to, this.node, iReq.member, aComplete); break;
-    case 'remove': sRegSvc.listRemove(iReq.to, this.node, iReq.member, aComplete); break;
+    case 'add':    sRegSvc.listAdd(iReq.to, this.uid, iReq.member, aComplete); break;
+    case 'remove': sRegSvc.listRemove(iReq.to, this.uid, iReq.member, aComplete); break;
     default:       aComplete(new Error('invalid listEdit type: '+iReq.type));
     }
     var that = this;
@@ -543,7 +540,7 @@ Link.prototype = {
       if (iReq.to[a] === NaN || iReq.to[a] < 2 || iReq.to[a] > 3)
         continue;
       ++aCbCount;
-      sRegSvc.listLookup(a, that.node, aSend);
+      sRegSvc.listLookup(a, that.uid, aSend);
     }
     if (aCbCount === 0)
       that._postSend(iReq, iBuf);
@@ -554,7 +551,7 @@ Link.prototype = {
         else aCbErr.message += ', '+err.message;
       } else {
         for (var a in members)
-          if (a !== that.node || iReq.to[list] === 3)
+          if (a !== that.uid || iReq.to[list] === 3)
             iReq.to[a] = members[a];
       }
       delete iReq.to[list];
@@ -570,7 +567,7 @@ Link.prototype = {
   _postSend: function(iReq, iBuf) {
     var that = this;
     var aId = this._makeId();
-    var aMsg = makeMsg({op:'deliver', id:aId, from:that.node, etc:iReq.etc}, iBuf);
+    var aMsg = makeMsg({op:'deliver', id:aId, from:that.uid, etc:iReq.etc}, iBuf);
     fs.open(sTempDir+aId, 'w', 0600, function(err, fd) {
       if (err) return that._ackFail(iReq.id, err);
       writeAll(fd, aMsg, function(err) { // attempt write to temp
@@ -579,17 +576,28 @@ Link.prototype = {
           fs.close(fd);
           if (err) return that._ackFail(iReq.id, err);
           sMsgCache.put(aId, aMsg);
-          var aToCount = 0;
-          for (var a in iReq.to) {
+          var aTo = {}, aToCount = 0;
+          for (var aUid in iReq.to) {
             ++aToCount;
-            queueItem(a, aId, aCb);
+            sRegSvc.getNodes(aUid, fUidCb);
           }
-          function aCb() {
+          function fUidCb(err, uid, list) {
+            if (err) throw err;
+            for (var aN in list)
+              aTo[uid+aN] = list[aN];
             if (--aToCount > 0)
               return;
-            if (that.conn)
-              that.conn.write(1, 'binary', makeMsg({op:'ack', type:'ok', id:iReq.id}));
-            fs.unlink(sTempDir+aId, noop);
+            for (var aN in aTo) {
+              ++aToCount;
+              queueItem(aN, aId, fToCb);
+            }
+            function fToCb() {
+              if (--aToCount > 0)
+                return;
+              if (that.conn)
+                that.conn.write(1, 'binary', makeMsg({op:'ack', type:'ok', id:iReq.id}));
+              fs.unlink(sTempDir+aId, noop);
+            }
           }
         });
       });

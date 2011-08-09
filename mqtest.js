@@ -28,7 +28,7 @@ function Testconn(iId, iReg) {
   this.client.on('registered', function(aliases) {
     that.reg = true;
     console.log(that.id+' registered '+aliases);
-    that.client.login(that.id, 'password');
+    that.client.login(that.id, 'node'+that.id);
   });
   this.client.on('info', function(msg) {
     console.log(that.id+' '+msg);
@@ -94,9 +94,9 @@ function testLink(aC, iState) {
       aC.client.connect('localhost', 8008, function() {
         aC.open = true;
         if (aC.reg)
-          aC.client.login(aC.id, 'password');
+          aC.client.login(aC.id, 'node'+aC.id);
         else
-          aC.client.register(aC.id, 'password', 'alias'+aC.id);
+          aC.client.register(aC.id, 'node'+aC.id, 'prevnode', 'alias'+aC.id);
         setTimeout(testLink, (Date.now()%10+1)*1000, aC, iState+1);
       });
     break;

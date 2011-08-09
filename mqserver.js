@@ -98,15 +98,6 @@ function main(argv) {
     });
   });
 
-  fs.writeFileSync(sPid, process.pid.toString());
-  process.on('SIGINT', function() {
-    fs.unlink(sPid, noop);
-    aServer.close();
-    mq.quit();
-  });
-
-  aServer.listen(8008);
-
   var aHttp = http.createServer(function(req, res) {
     if (req.method.toLowerCase() === 'post') {
       var aUrl = url.parse(req.url, true);
@@ -135,6 +126,16 @@ function main(argv) {
       res.end(aHtml);
     }
   });
+
+  fs.writeFileSync(sPid, process.pid.toString());
+  process.on('SIGINT', function() {
+    fs.unlink(sPid, noop);
+    aHttp.close();
+    aServer.close();
+    mq.quit();
+  });
+
+  aServer.listen(8008);
   aHttp.listen(8080);
 }
 
@@ -150,12 +151,14 @@ function RegDb(iFileName) {
 
 RegDb.prototype = {
 
-  register: function(iUid, iPassword, iAliases, iCallback, iReReg) {
+  register: function(iUid, iNewNode, iPrevNode, iAliases, iCallback, iReReg) {
     var aHas = iUid in this.db.uid;
     if (!iReReg && aHas || iReReg && !aHas)
       var aErr = aHas ? 'user exists' : 'no such user';
-    else if (!aHas && !iPassword)
-      var aErr = 'password required';
+    else if (!aHas && !iNewNode)
+      var aErr = 'new nodename required';
+    else if (aHas && iNewNode && !(iPrevNode in this.db.uid[iUid].nodes))
+      var aErr = 'prev nodename invalid';
     if (aErr) {
       process.nextTick(function() { iCallback(new Error(aErr)) });
       return;
@@ -164,9 +167,9 @@ RegDb.prototype = {
       for (var a=0; a < this.db.uid[iUid].aliases.length; ++a)
         delete this.db.alias[this.db.uid[iUid].aliases[a]];
     if (!aHas)
-      this.db.uid[iUid] = {};
-    if (iPassword)
-      this.db.uid[iUid].password = iPassword;
+      this.db.uid[iUid] = { nodes:{}, aliases:null };
+    if (iNewNode)
+      this.db.uid[iUid].nodes[iNewNode] = true;
     if (iAliases) {
       var aAccept = iAliases.split(/\s+/);
       for (var a=aAccept.length-1; a >= 0; --a) {
@@ -184,8 +187,8 @@ RegDb.prototype = {
     });
   } ,
 
-  reregister: function(iUid, iPassword, iAliases, iCallback) {
-    this.register(iUid, iPassword, iAliases, iCallback, true);
+  reregister: function(iUid, iNewNode, iPrevNode, iAliases, iCallback) {
+    this.register(iUid, iNewNode, iPrevNode, iAliases, iCallback, true);
   } ,
 
   remove: function(iUid) {
@@ -200,10 +203,17 @@ RegDb.prototype = {
     return true;
   } ,
 
-  verify: function(iUid, iPassword, iCallback) {
+  verify: function(iUid, iNode, iCallback) {
     var that = this;
     process.nextTick(function() {
-      iCallback(null, iUid in that.db.uid && that.db.uid[iUid].password === iPassword);
+      iCallback(null, iUid in that.db.uid && iNode in that.db.uid[iUid].nodes);
+    });
+  } ,
+
+  getNodes: function(iUid, iCallback) {
+    var that = this;
+    process.nextTick(function() {
+      iCallback(that.db.uid[iUid] ? null : new Error('no such uid'), iUid, that.db.uid[iUid] && that.db.uid[iUid].nodes);
     });
   } ,
 
