@@ -427,7 +427,7 @@ Link.prototype = {
 
     for (var a in this.params[aReq.op]) {
       if (typeof aReq[a] !== this.params[aReq.op][a])
-        throw 'missing request param '+a;
+        throw aReq.op+' request missing param '+a;
     }
 
     if (aReq.op !== 'post' && aReq.op !== 'listEdit' && iMsg.length > aJsEnd)

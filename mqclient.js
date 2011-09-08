@@ -49,12 +49,11 @@ function MqClient() {
       // fall thru
     case process.EAGAIN:
     case process.ECONNREFUSED:
+    case process.ENOTCONN:
       setTimeout(function() {
         that.socket.connect(that.port, that.host);
       }, aTime*1000);
-      // fall thru
-    case process.ENOTCONN:
-      console.log('mqclient '+err.message+(err.errno === process.ENOTCONN ? '' : '. retrying...'));///debugging
+      console.log('mqclient '+err.message+'. retrying...');///debugging
       break;
     default:
       that.event_error(err.message);

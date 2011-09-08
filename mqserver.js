@@ -1,5 +1,5 @@
 
-// websocket-based server for mqlib
+// socket-based server for mqlib
 
 var sys = require('sys');
 var fs = require('fs');
