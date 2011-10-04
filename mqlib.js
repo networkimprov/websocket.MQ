@@ -414,7 +414,7 @@ Link.prototype = {
       throw 'message arrived on closed connection';
 
     var aJsEnd = parseInt(iMsg.toString('ascii', 0, 4), 16) +4;
-    if (aJsEnd === NaN)
+    if (aJsEnd === NaN || aJsEnd < 4 || aJsEnd > iMsg.length)
       throw 'invalid length header';
 
     var aReq = JSON.parse(iMsg.toString('ascii', 4, aJsEnd));
@@ -430,7 +430,7 @@ Link.prototype = {
         throw aReq.op+' request missing param '+a;
     }
 
-    if (aReq.op !== 'post' && aReq.op !== 'listEdit' && iMsg.length > aJsEnd)
+    if (aReq.op !== 'listEdit' && aReq.op !== 'post' && aReq.op !== 'ping' && iMsg.length > aJsEnd)
       throw 'message body disallowed for '+aReq.op;
 
     var aBuf = iMsg.length > aJsEnd ? iMsg.slice(aJsEnd, iMsg.length) : null;
@@ -502,7 +502,7 @@ Link.prototype = {
         }
         return;
       }
-      if (iReq.etc || iBuf) {
+      if (iBuf) {
         var aTo = {};
         aTo[iReq.to] = 3;
         that.handle_post({id:iReq.id, to:aTo, etc:iReq.etc}, iBuf);
@@ -604,7 +604,7 @@ Link.prototype = {
     });
   } ,
 
-  handle_ping: function(iReq) {
+  handle_ping: function(iReq, iBuf) {
     var that = this;
     sRegSvc.lookup(iReq.alias, function(err, node) {
       if (err)
@@ -612,7 +612,7 @@ Link.prototype = {
       delete iReq.alias;
       iReq.to = {};
       iReq.to[node] = 1;
-      that._postSend(iReq, null);
+      that._postSend(iReq, iBuf);
     });
   } ,
 

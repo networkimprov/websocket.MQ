@@ -5,22 +5,36 @@ var net = require('net');
 var WsStream = require('./wsstream/wsstream');
 
 function packMsg(iJso, iData) {
+  var aEtc = iJso.etc ? JSON.stringify(iJso.etc) : '';
+  if (aEtc.length)
+    iJso.etc = aEtc.length;
   var aReq = JSON.stringify(iJso);
   var aLen = (aReq.length.toString(16)+'   ').slice(0,4);
-  var aBuf = new Buffer(aLen.length + aReq.length + (iData ? iData.length : 0));
+  var aBuf = new Buffer(aLen.length + aReq.length + aEtc.length + (iData ? iData.length : 0));
   aBuf.write(aLen, 0);
   aBuf.write(aReq, aLen.length);
+  aBuf.write(aEtc, aLen.length + aReq.length);
   if (iData)
-    iData.copy(aBuf, aLen.length + aReq.length, 0);
+    iData.copy(aBuf, aLen.length + aReq.length + aEtc.length, 0);
   return aBuf;
 }
 
 function unpackMsg(iMsg) {
   var aLen = iMsg.toString('ascii',0,4);
   var aJsEnd = parseInt(aLen, 16) +4;
-  if (aJsEnd === NaN)
+  if (aJsEnd === NaN || aJsEnd < 4 || aJsEnd > iMsg.length)
     throw new Error('invalid length prefix '+aLen);
+
   var aReq = JSON.parse(iMsg.toString('ascii', 4, aJsEnd));
+
+  if (typeof aReq.etc === 'number') {
+    if (aReq.etc < 0 || aJsEnd+aReq.etc > iMsg.length)
+      throw new Error('invalid etc value');
+    aJsEnd += aReq.etc;
+    aReq.etc = JSON.parse(iMsg.toString('ascii', aJsEnd-aReq.etc, aJsEnd));
+  } else {
+    delete aReq.etc;
+  }
   aReq._buf = iMsg.length > aJsEnd ? iMsg.slice(aJsEnd, iMsg.length) : undefined;
   return aReq;
 }
@@ -36,10 +50,12 @@ function MqClient() {
     that.socket.setNoDelay();
     that.event_connect();
   });
+
   this.socket.on('close', function() {
     if (that.event_close)
       that.event_close();
   });
+
   this.socket.on('error', function(err) {
     var aTime = 60;
     switch(err.errno) {
@@ -59,13 +75,17 @@ function MqClient() {
       that.event_error(err.message);
     }
   });
+
   this.ws.on('data', function(frame, buf) {
     try {
     var aReq = unpackMsg(buf);
-    if (!that['event_'+aReq.op])
-      throw new Error('no handler for '+aReq.op);
+    if (typeof aReq.op !== 'string' || typeof that.sParams[aReq.op] === 'undefined')
+      throw new Error('invalid request op: '+aReq.op);
+    for (var a in that.sParams[aReq.op])
+      if (typeof aReq[a] !== that.sParams[aReq.op][a])
+        throw new Error(aReq.op+' request missing param '+a);
     } catch (err) {
-      that.event_error(err.message);
+      that.event_error(err);
       return;
     }
     switch (aReq.op) {
@@ -76,6 +96,7 @@ function MqClient() {
     case 'quit':       that['event_'+aReq.op](aReq.info);                               break;
     }
   });
+
   this.ws.on('end', function(ok) {
     if (that.event_end)
       that.event_end(ok);
@@ -86,6 +107,14 @@ MqClient.packMsg = packMsg;
 MqClient.unpackMsg = unpackMsg;
 
 MqClient.prototype = {
+
+  sParams: {
+    registered: {  },
+    deliver:    { id:'string', from:'string' },
+    ack:        { id:'string', type:'string' },
+    info:       { info:'string' },
+    quit:       { info:'string' }
+  } ,
 
   event_error: function(msg) { throw new Error(msg) } ,
 
