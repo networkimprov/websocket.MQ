@@ -55,7 +55,7 @@ function syncFile(iPath, iCallback) {
   fs.open(iPath, 'r', function(err, fd) {
     if (err) return iCallback(err);
     fs.fsync(fd, function(err) {
-      fs.close(fd);
+      fs.close(fd, noop);
       iCallback(err);
     });
   });
@@ -145,6 +145,10 @@ function _newQueue(iNode, ioArray) {
   ioArray.tries = 0;
   ioArray.next = 0;
   ioArray.quiet = null;
+  ioArray.pending = 0;
+  ioArray.deferring = 0;
+  ioArray.defer = null;
+  ioArray.onDrain = null;
   sQueues[iNode] = ioArray;
 }
 
@@ -158,6 +162,9 @@ function _deleteQueue(iNode) {
   for (var a=0; a < sQueues[iNode].length; ++a)
     if (sQueues[iNode][a])
       sMsgCache.unlink(sQueues[iNode][a]);
+  if (sQueues[iNode].defer)
+    for (var a=0; a < sQueues[iNode].defer.length; ++a)
+      sMsgCache.unlink(sQueues[iNode].defer[a]);
   delete sQueues[iNode];
 }
 
@@ -194,35 +201,47 @@ function stopQueue(iNode) {
 function queueItem(iNode, iId, iCallback) {
   if (!sLock.write(iNode, function(){queueItem(iNode, iId, iCallback)}))
     return;
+  if (sQueues[iNode]) {
+    var aType = sQueues[iNode].onDrain ? 'deferring' : 'pending';
+    ++sQueues[iNode][aType];
+  }
   fs.mkdir(getSub(iNode), 0700, function(errSub) {
     if (errSub && errSub.errno !== process.EEXIST) throw errSub;
     fs.mkdir(getPath(iNode), 0700, function(errNode) {
       if (errNode && errNode.errno !== process.EEXIST) throw errNode;
       fs.link(sTempDir+iId, getPath(iNode)+'/'+iId, function(err) {
         if (err) throw err;
-        if (iNode in sQueues) {
-          sQueues[iNode].push(iId);
+        if (sQueues[iNode]) {
           sMsgCache.link(iId);
-          if (sQueues[iNode].tries === 0)
-            _sendNext(iNode);
+          if (aType)
+            --sQueues[iNode][aType];
+          if (aType === 'pending' || !sQueues[iNode].onDrain) {
+            sQueues[iNode].push(iId);
+            if (sQueues[iNode].tries === 0)
+              _sendNext(iNode);
+          } else {
+            if (!sQueues[iNode].defer)
+              sQueues[iNode].defer = [];
+            sQueues[iNode].defer.push(iId);
+          }
         }
         sLock.free(iNode);
-        var aDone = function(err) {
+        if (!errSub) syncFile(sMainDir, fDone);
+        if (!errNode) syncFile(getSub(iNode), fDone);
+        syncFile(getPath(iNode), fDone);
+        function fDone(err) {
           if (err) throw err;
           if (!errSub) errSub = true;
           else if (!errNode) errNode = true;
           else iCallback();
-        };
-        if (!errSub) syncFile(sMainDir, aDone);
-        if (!errNode) syncFile(getSub(iNode), aDone);
-        syncFile(getPath(iNode), aDone);
+        }
       });
     });
   });
 }
 
 function deQueueItem(iNode, iId) {
-  if (sQueues[iNode].length === 0 || sQueues[iNode][sQueues[iNode].next] !== iId)
+  if (!sQueues[iNode] || !sQueues[iNode].length || sQueues[iNode][sQueues[iNode].next] !== iId)
     return;
   fs.unlink(getPath(iNode)+'/'+iId, noop);
   sMsgCache.unlink(iId);
@@ -232,11 +251,37 @@ function deQueueItem(iNode, iId) {
     clearTimeout(sQueues[iNode].timer);
     sQueues[iNode].timer = null;
   }
-  if (++sQueues[iNode].next < sQueues[iNode].length)
+  if (++sQueues[iNode].next < sQueues[iNode].length) {
     _sendNext(iNode);
-  else
+  } else {
     sQueues[iNode].next = sQueues[iNode].length = 0;
+    if (!sQueues[iNode].onDrain || sQueues[iNode].pending)
+      return;
+    sQueues[iNode].onDrain(true);
+    sQueues[iNode].onDrain = null;
+    if (sQueues[iNode].defer) {
+      for (var a=0; a < sQueues[iNode].defer.length; ++a)
+        sQueues[iNode].push(sQueues[iNode].defer[a]);
+      sQueues[iNode].defer = null;
+      _sendNext(iNode);
+    }
+  }
 }
+
+function drainQueue(iNode, iCallback) {
+  if (!sQueues[iNode]) {
+    if (sLock.read(iNode, function() { drainQueue(iNode, iCallback) }))
+      throw new Error('no queue but read lock acquired');
+    return;
+  }
+  if (!sQueues[iNode].onDrain && !sQueues[iNode].deferring && (sQueues[iNode].pending || sQueues[iNode].length)) {
+    sQueues[iNode].onDrain = iCallback;
+  } else {
+    var aNotDrain = !sQueues[iNode].onDrain && !sQueues[iNode].deferring;
+    process.nextTick(function() { iCallback(aNotDrain) });
+  }
+}
+
 
 function LList() {
   this.head = null;
@@ -398,7 +443,8 @@ function Link(iConn) {
 Link.prototype = {
 
   params: {
-    register: { userId:'string', newNode:'string', prevNode:'string', aliases:'string' },
+    register: { userId:'string', newNode:'string', aliases:'string' },
+    addNode:  { userId:'string', newNode:'string', prevNode:'string' },
     login:    { userId:'string', nodeId:'string' },
     listEdit: { id:'string', to:'string', type:'string', member:'string' },
     //listRenew:{ id:'string', to:'string', list:'object' },
@@ -452,7 +498,7 @@ Link.prototype = {
 
   handle_register: function(iReq) {
     var that = this;
-    sRegSvc[this.node ? 'reregister' : 'register'](iReq.userId, iReq.newNode, iReq.prevNode, iReq.aliases, function(err, aliases) {
+    sRegSvc[this.node ? 'reregister' : 'register'](iReq.userId, iReq.newNode, null, iReq.aliases, function(err, aliases) {
       if (!that.conn)
         return;
       if (err) {
@@ -460,6 +506,22 @@ Link.prototype = {
         return;
       }
       that.conn.write(1, 'binary', makeMsg({op:'registered', aliases:aliases}));
+    });
+  } ,
+
+  handle_addNode: function(iReq) {
+    var that = this;
+    sRegSvc.reregister(iReq.userId, iReq.newNode, iReq.prevNode, null, function(err) {
+      if (!that.conn)
+        return;
+      if (err) {
+        that.conn.write(1, 'binary', makeMsg({op:'info', info:'addNode fail: '+err.message}));
+        return;
+      }
+      drainQueue(that.node, function(ok) {
+        if (that.conn)
+          that.conn.write(1, 'binary', makeMsg(ok ? {op:'added'} : {op:'info', info:'addNode in-progress'}));
+      });
     });
   } ,
 
@@ -571,20 +633,22 @@ Link.prototype = {
     fs.open(sTempDir+aId, 'w', 0600, function(err, fd) {
       if (err) return that._ackFail(iReq.id, err);
       writeAll(fd, aMsg, function(err) { // attempt write to temp
-        if (err) { fs.close(fd); return that._ackFail(iReq.id, err); }
+        if (err) { fs.close(fd, noop); return that._ackFail(iReq.id, err); }
         fs.fsync(fd, function(err) {
-          fs.close(fd);
+          fs.close(fd, noop);
           if (err) return that._ackFail(iReq.id, err);
           sMsgCache.put(aId, aMsg);
-          var aTo = {}, aToCount = 0;
+          var aTo = {}, aToCount = 1;
           for (var aUid in iReq.to) {
             ++aToCount;
             sRegSvc.getNodes(aUid, fUidCb);
           }
+          sRegSvc.getNodes(that.uid, fUidCb);
           function fUidCb(err, uid, list) {
             if (err) throw err;
             for (var aN in list)
-              aTo[uid+aN] = list[aN];
+              if (uid+aN !== that.node)
+                aTo[uid+aN] = list[aN];
             if (--aToCount > 0)
               return;
             for (var aN in aTo) {

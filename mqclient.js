@@ -88,12 +88,14 @@ function MqClient() {
       that.event_error(err);
       return;
     }
+    var aFn = that['event_'+aReq.op];
     switch (aReq.op) {
-    case 'registered': that['event_'+aReq.op](aReq.aliases);                            break;
-    case 'deliver':    that['event_'+aReq.op](aReq.id, aReq.from, aReq._buf, aReq.etc); break;
-    case 'ack':        that['event_'+aReq.op](aReq.id, aReq.type);                      break;
-    case 'info':       that['event_'+aReq.op](aReq.info);                               break;
-    case 'quit':       that['event_'+aReq.op](aReq.info);                               break;
+    case 'registered': aFn(aReq.aliases);                            break;
+    case 'added':      aFn();                                        break;
+    case 'deliver':    aFn(aReq.id, aReq.from, aReq._buf, aReq.etc); break;
+    case 'ack':        aFn(aReq.id, aReq.type);                      break;
+    case 'info':       aFn(aReq.info);                               break;
+    case 'quit':       aFn(aReq.info);                               break;
     }
   });
 
@@ -110,6 +112,7 @@ MqClient.prototype = {
 
   sParams: {
     registered: {  },
+    added:      {  },
     deliver:    { id:'string', from:'string' },
     ack:        { id:'string', type:'string' },
     info:       { info:'string' },
@@ -134,8 +137,13 @@ MqClient.prototype = {
     return this.socket.readable && this.socket.writable;
   } ,
 
-  register: function(iUid, iNewNode, iPrevNode, iAliases) {
-    var aMsg = packMsg({op:'register', userId:iUid, newNode:iNewNode, prevNode:iPrevNode, aliases:iAliases});
+  register: function(iUid, iNewNode, iAliases) {
+    var aMsg = packMsg({op:'register', userId:iUid, newNode:iNewNode, aliases:iAliases});
+    this.ws.write(1, 'binary', aMsg);
+  } ,
+
+  addNode: function(iUid, iNewNode, iPrevNode) {
+    var aMsg = packMsg({op:'addNode', userId:iUid, newNode:iNewNode, prevNode:iPrevNode});
     this.ws.write(1, 'binary', aMsg);
   } ,
 

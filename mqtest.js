@@ -20,6 +20,7 @@ function Testconn(iId, iReg) {
   this.open = false;
   this.reg = iReg;
   this.id = iId;
+  this.n = 0;
   this.data = {};
   this.big = 0;
   this.ack = [];
@@ -29,6 +30,9 @@ function Testconn(iId, iReg) {
     that.reg = true;
     console.log(that.id+' registered '+aliases);
     that.client.login(that.id, 'node'+that.id);
+  });
+  this.client.on('added', function() {
+    console.log(that.id+' added node '+that.n);
   });
   this.client.on('info', function(msg) {
     console.log(that.id+' '+msg);
@@ -96,17 +100,20 @@ function testLink(aC, iState) {
         if (aC.reg)
           aC.client.login(aC.id, 'node'+aC.id);
         else
-          aC.client.register(aC.id, 'node'+aC.id, 'prevnode', 'alias'+aC.id);
+          aC.client.register(aC.id, 'node'+aC.id, 'alias'+aC.id);
         setTimeout(testLink, (Date.now()%10+1)*1000, aC, iState+1);
       });
     break;
   case 1: case 2: case 3: case 4: case 5: case 6: case 7: case 8: case 9: case 10:
     var aData = aC.id === 'jjkkj' && iState === 1 ? sBig : sMsgList[iState-1];
-    if (aC.client.isOpen())
-      if (aC.id === 'jjkkj' && iState === 2)
+    if (aC.client.isOpen()) {
+      if (Date.now()%299 === 0)
+        aC.client.addNode(aC.id, 'newnode'+aC.n++, 'node'+aC.id);
+      else if (aC.id === 'jjkkj' && iState === 2)
         aC.client.ping('aliasiijji', (iState-1).toString(), 'pingmsg');
       else
         aC.client.post(aC.id === 'iijji' && iState === 9 ? sListList : sToList, aData, (iState-1).toString());
+    }
     setTimeout(testLink, (Date.now()%10)*800, aC, aC.client.isOpen() ? iState+1 : 0);
     break;
   case 11:
