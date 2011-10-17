@@ -157,8 +157,11 @@ RegDb.prototype = {
       var aErr = aHas ? 'user exists' : 'no such user';
     else if (!aHas && !iNewNode)
       var aErr = 'new nodename required';
-    else if (aHas && iNewNode && !(iPrevNode in this.db.uid[iUid].nodes))
-      var aErr = 'prev nodename invalid';
+    else if (aHas && iNewNode)
+      if (!(iPrevNode in this.db.uid[iUid].nodes))
+        var aErr = 'prev nodename invalid';
+      else if (iNewNode in this.db.uid[iUid].nodes)
+        var aErr = 'new nodename exists';
     if (aErr) {
       process.nextTick(function() { iCallback(new Error(aErr)) });
       return;
@@ -212,8 +215,14 @@ RegDb.prototype = {
 
   getNodes: function(iUid, iCallback) {
     var that = this;
+    var aList, aErr = that.db.uid[iUid] ? null : new Error('no such uid');
+    if (that.db.uid[iUid]) {
+      aList = {};
+      for (var a in that.db.uid[iUid].nodes)
+        aList[a] = true;
+    }
     process.nextTick(function() {
-      iCallback(that.db.uid[iUid] ? null : new Error('no such uid'), iUid, that.db.uid[iUid] && that.db.uid[iUid].nodes);
+      iCallback(aErr, iUid, aList);
     });
   } ,
 

@@ -10,6 +10,7 @@ var sQuietHoursMax = 28;
 var sQuietCleanPeriod = 20*1000;
 
 var sQueues = {}; // array objects indexed by nodeid
+var sPending = {}; // pending message counts indexed by uid
 var sActive = {}; // connections indexed by nodeid
 var sShutdown = false;
 
@@ -135,9 +136,7 @@ function _sendNext(iNode) {
   });
 }
 
-function _newQueue(iNode, ioArray) {
-  if ('tries' in sQueues[iNode])
-    throw new Error('queue already exists');
+function _newQueue(iUid, ioArray) {
   ioArray.sort();
   for (var a=0; a < ioArray.length; ++a)
     sMsgCache.link(ioArray[a]);
@@ -145,11 +144,11 @@ function _newQueue(iNode, ioArray) {
   ioArray.tries = 0;
   ioArray.next = 0;
   ioArray.quiet = null;
-  ioArray.pending = 0;
-  ioArray.deferring = 0;
-  ioArray.defer = null;
-  ioArray.onDrain = null;
-  sQueues[iNode] = ioArray;
+  ioArray.uid = iUid;
+  if (!sPending[iUid])
+    sPending[iUid] = { q:0, m:{} };
+  ++sPending[iUid].q;
+  return ioArray;
 }
 
 function _deleteQueue(iNode) {
@@ -162,14 +161,25 @@ function _deleteQueue(iNode) {
   for (var a=0; a < sQueues[iNode].length; ++a)
     if (sQueues[iNode][a])
       sMsgCache.unlink(sQueues[iNode][a]);
-  if (sQueues[iNode].defer)
-    for (var a=0; a < sQueues[iNode].defer.length; ++a)
-      sMsgCache.unlink(sQueues[iNode].defer[a]);
+  if (--sPending[sQueues[iNode].uid].q === 0)
+    delete sPending[sQueues[iNode].uid];
   delete sQueues[iNode];
 }
 
-function startQueue(iNode) {
-  if (sQueues[iNode]) {
+function addPending(iUid, iId) {
+  if (sPending[iUid])
+    sPending[iUid].m[iId] = true;
+}
+
+function delPending(iUid, iId) {
+  if (sPending[iUid])
+    delete sPending[iUid].m[iId];
+}
+
+function startQueue(iNode, iUid) {
+  if (!sQueues[iNode])
+    sQueues[iNode] = { };
+  if ('tries' in sQueues[iNode]) {
     sQuiet.remove(sQueues[iNode].quiet);
     sQueues[iNode].quiet = null;
     if (typeof sQueues[iNode].tries === 'number')
@@ -178,12 +188,14 @@ function startQueue(iNode) {
   }
   if (!sLock.read(iNode, function(){startQueue(iNode)} ))
     return;
-  var aQ = sQueues[iNode] = { };
   fs.readdir(getPath(iNode), function(err, array) {
     if (err && err.errno !== process.ENOENT) throw err;
-    _newQueue(iNode, array || []);
-    if (aQ.quiet)
-      sQueues[iNode].quiet = aQ.quiet;
+    if ('tries' in sQueues[iNode])
+      throw new Error('queue already exists');
+    var aQ = sQueues[iNode].quiet;
+    sQueues[iNode] = _newQueue(iUid, array || []);
+    if (aQ)
+      sQueues[iNode].quiet = aQ;
     else if (sQueues[iNode].length)
       _sendNext(iNode);
     sLock.free(iNode);
@@ -201,29 +213,26 @@ function stopQueue(iNode) {
 function queueItem(iNode, iId, iCallback) {
   if (!sLock.write(iNode, function(){queueItem(iNode, iId, iCallback)}))
     return;
-  if (sQueues[iNode]) {
-    var aType = sQueues[iNode].onDrain ? 'deferring' : 'pending';
-    ++sQueues[iNode][aType];
-  }
   fs.mkdir(getSub(iNode), 0700, function(errSub) {
     if (errSub && errSub.errno !== process.EEXIST) throw errSub;
     fs.mkdir(getPath(iNode), 0700, function(errNode) {
       if (errNode && errNode.errno !== process.EEXIST) throw errNode;
       fs.link(sTempDir+iId, getPath(iNode)+'/'+iId, function(err) {
         if (err) throw err;
-        if (sQueues[iNode]) {
+        if (sQueues[iNode] && 'tries' in sQueues[iNode]) {
           sMsgCache.link(iId);
-          if (aType)
-            --sQueues[iNode][aType];
-          if (aType === 'pending' || !sQueues[iNode].onDrain) {
-            sQueues[iNode].push(iId);
-            if (sQueues[iNode].tries === 0)
-              _sendNext(iNode);
-          } else {
-            if (!sQueues[iNode].defer)
-              sQueues[iNode].defer = [];
-            sQueues[iNode].defer.push(iId);
+          sQueues[iNode].push(iId);
+          if (sQueues[iNode].pending) {
+            delete sQueues[iNode].pending[iId];
+            for (var any in sQueues[iNode].pending) break;
+            if (!any) {
+              _copyQueue(iNode, sQueues[iNode].newNode, sQueues[iNode].onCopy);
+              delete sQueues[iNode].pending;
+              delete sQueues[iNode].newNode;
+            }
           }
+          if (sQueues[iNode].tries === 0)
+            _sendNext(iNode);
         }
         sLock.free(iNode);
         if (!errSub) syncFile(sMainDir, fDone);
@@ -251,35 +260,60 @@ function deQueueItem(iNode, iId) {
     clearTimeout(sQueues[iNode].timer);
     sQueues[iNode].timer = null;
   }
-  if (++sQueues[iNode].next < sQueues[iNode].length) {
+  if (++sQueues[iNode].next < sQueues[iNode].length)
     _sendNext(iNode);
-  } else {
+  else
     sQueues[iNode].next = sQueues[iNode].length = 0;
-    if (!sQueues[iNode].onDrain || sQueues[iNode].pending)
-      return;
-    sQueues[iNode].onDrain(true);
-    sQueues[iNode].onDrain = null;
-    if (sQueues[iNode].defer) {
-      for (var a=0; a < sQueues[iNode].defer.length; ++a)
-        sQueues[iNode].push(sQueues[iNode].defer[a]);
-      sQueues[iNode].defer = null;
-      _sendNext(iNode);
-    }
+}
+
+function copyQueue(iNode, iNewNode, iCallback) {
+  var aOk = sQueues[iNode] && 'tries' in sQueues[iNode] && !sQueues[iNode].onCopy;
+  for (var any in sPending[sQueues[iNode].uid].m) break;
+  if (!aOk || !any && !sQueues[iNode].length) {
+    process.nextTick(function() { iCallback(aOk) });
+  } else if (any) {
+    sQueues[iNode].pending = {};
+    for (var a in sPending[sQueues[iNode].uid].m)
+      sQueues[iNode].pending[a] = true;
+    sQueues[iNode].newNode = iNewNode;
+    sQueues[iNode].onCopy = fDone;
+  } else {
+    sQueues[iNode].onCopy = true;
+    _copyQueue(iNode, iNewNode, fDone);
+  }
+  function fDone() {
+    delete sQueues[iNode].onCopy;
+    iCallback(true);
   }
 }
 
-function drainQueue(iNode, iCallback) {
-  if (!sQueues[iNode]) {
-    if (sLock.read(iNode, function() { drainQueue(iNode, iCallback) }))
-      throw new Error('no queue but read lock acquired');
-    return;
-  }
-  if (!sQueues[iNode].onDrain && !sQueues[iNode].deferring && (sQueues[iNode].pending || sQueues[iNode].length)) {
-    sQueues[iNode].onDrain = iCallback;
-  } else {
-    var aNotDrain = !sQueues[iNode].onDrain && !sQueues[iNode].deferring;
-    process.nextTick(function() { iCallback(aNotDrain) });
-  }
+function _copyQueue(iNode, iNewNode, iCallback) {
+  fs.mkdir(getSub(iNewNode), 0700, function(errSub) {
+    if (errSub && errSub.errno !== process.EEXIST) throw errSub;
+    fs.mkdir(getPath(iNewNode), 0700, function(errNode) {
+      if (errNode && errNode.errno !== process.EEXIST) throw errNode;
+      // if dir exists, may contain links from previous attempt
+      for (var aN=sQueues[iNode].next; aN < sQueues[iNode].length; ++aN)
+        fs.link(getPath(iNode)+'/'+sQueues[iNode][aN], getPath(iNewNode)+'/'+sQueues[iNode][aN], fLinked);
+      aN = sQueues[iNode].length - sQueues[iNode].next;
+      if (aN === 0)
+        iCallback();
+      function fLinked(err) {
+        if (err && err.errno !== process.EEXIST && err.errno !== process.ENOENT) throw err;
+        if (--aN > 0)
+          return;
+        if (!errSub) syncFile(sMainDir, fDone);
+        if (!errNode) syncFile(getSub(iNewNode), fDone);
+        syncFile(getPath(iNewNode), fDone);
+        function fDone(err) {
+          if (err) throw err;
+          if (!errSub) errSub = true;
+          else if (!errNode) errNode = true;
+          else iCallback();
+        }
+      }
+    });
+  });
 }
 
 
@@ -356,7 +390,8 @@ var sMsgCache = {
 
   get: function(iNode, iId, iCallback) {
     if (this.cache[iId].msg) {
-      process.nextTick(function() { iCallback(sMsgCache.cache[iId].msg) });
+      var aMsg = this.cache[iId].msg;
+      process.nextTick(function() { iCallback(aMsg) });
       return;
     }
     if (this.cache[iId].wait) {
@@ -518,9 +553,9 @@ Link.prototype = {
         that.conn.write(1, 'binary', makeMsg({op:'info', info:'addNode fail: '+err.message}));
         return;
       }
-      drainQueue(that.node, function(ok) {
+      copyQueue(that.node, that.uid+iReq.newNode, function(ok) {
         if (that.conn)
-          that.conn.write(1, 'binary', makeMsg(ok ? {op:'added'} : {op:'info', info:'addNode in-progress'}));
+          that.conn.write(1, 'binary', makeMsg(ok ? {op:'added', node:iReq.newNode} : {op:'info', info:'addNode queue busy'}));
       });
     });
   } ,
@@ -641,8 +676,10 @@ Link.prototype = {
           var aTo = {}, aToCount = 1;
           for (var aUid in iReq.to) {
             ++aToCount;
+            addPending(aUid, aId);
             sRegSvc.getNodes(aUid, fUidCb);
           }
+          addPending(that.uid, aId);
           sRegSvc.getNodes(that.uid, fUidCb);
           function fUidCb(err, uid, list) {
             if (err) throw err;
@@ -658,6 +695,9 @@ Link.prototype = {
             function fToCb() {
               if (--aToCount > 0)
                 return;
+              for (var aUid in iReq.to)
+                delPending(aUid, aId);
+              delPending(that.uid, aId);
               if (that.conn)
                 that.conn.write(1, 'binary', makeMsg({op:'ack', type:'ok', id:iReq.id}));
               fs.unlink(sTempDir+aId, noop);

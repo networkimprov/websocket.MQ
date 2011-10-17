@@ -20,7 +20,7 @@ function Testconn(iId, iReg) {
   this.open = false;
   this.reg = iReg;
   this.id = iId;
-  this.n = 0;
+  this.n = 1;
   this.data = {};
   this.big = 0;
   this.ack = [];
@@ -29,14 +29,17 @@ function Testconn(iId, iReg) {
   this.client.on('registered', function(aliases) {
     that.reg = true;
     console.log(that.id+' registered '+aliases);
-    that.client.login(that.id, 'node'+that.id);
+    that.client.login(that.id, 'node0');
   });
-  this.client.on('added', function() {
-    console.log(that.id+' added node '+that.n);
+  this.client.on('added', function(node) {
+    console.log(that.id+' added node '+node);
   });
   this.client.on('info', function(msg) {
     console.log(that.id+' '+msg);
-    if (sPw) return;
+    if (/^addNode fail/.test(msg))
+      --that.n;
+    if (!/^ok login/.test(msg) || sPw)
+      return;
     if (!sListAgent || that.id === sListAgent) {
       sListAgent = that.id;
       for (var aId in sToList)
@@ -64,8 +67,8 @@ function Testconn(iId, iReg) {
       if (++that.big % 10 === 0)
         console.log(that.id+' got 10 big');
     } else if (aName in that.data) {
-      if (++that.data[aName] % 100 === 0)
-        console.log(that.id+' got 100 '+aName+' '+msg.length);
+      if (++that.data[aName] % 500 === 0)
+        console.log(that.id+' got 500 '+aName+' '+msg.length);
     } else
       that.data[aName] = 1;
   });
@@ -93,32 +96,32 @@ function testLink(aC, iState) {
   switch (iState) {
   case 0:
     if (aC.open)
-      setTimeout(testLink, (Date.now()%10)*500, aC, 0);
+      setTimeout(testLink, (Date.now()%10)*351, aC, 0);
     else
       aC.client.connect('localhost', 8008, function() {
         aC.open = true;
         if (aC.reg)
-          aC.client.login(aC.id, 'node'+aC.id);
+          aC.client.login(aC.id, 'node'+Date.now()%aC.n);
         else
-          aC.client.register(aC.id, 'node'+aC.id, 'alias'+aC.id);
-        setTimeout(testLink, (Date.now()%10+1)*1000, aC, iState+1);
+          aC.client.register(aC.id, 'node0', 'alias'+aC.id);
+        setTimeout(testLink, (Date.now()%10+1)*991, aC, iState+1);
       });
     break;
   case 1: case 2: case 3: case 4: case 5: case 6: case 7: case 8: case 9: case 10:
     var aData = aC.id === 'jjkkj' && iState === 1 ? sBig : sMsgList[iState-1];
     if (aC.client.isOpen()) {
-      if (Date.now()%299 === 0)
-        aC.client.addNode(aC.id, 'newnode'+aC.n++, 'node'+aC.id);
+      if (Date.now()%299 === 0 && aC.n < 4)
+        aC.client.addNode(aC.id, 'node'+aC.n++, 'node0');
       else if (aC.id === 'jjkkj' && iState === 2)
         aC.client.ping('aliasiijji', (iState-1).toString(), 'pingmsg');
       else
         aC.client.post(aC.id === 'iijji' && iState === 9 ? sListList : sToList, aData, (iState-1).toString());
     }
-    setTimeout(testLink, (Date.now()%10)*800, aC, aC.client.isOpen() ? iState+1 : 0);
+    setTimeout(testLink, (Date.now()%10)*817, aC, aC.client.isOpen() ? iState+1 : 0);
     break;
   case 11:
     aC.client.close();
-    setTimeout(testLink, (Date.now()%10)*800, aC, 0);
+    setTimeout(testLink, (Date.now()%10)*751, aC, 0);
     break;
   }
 }

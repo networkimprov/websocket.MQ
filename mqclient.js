@@ -66,10 +66,14 @@ function MqClient() {
     case process.EAGAIN:
     case process.ECONNREFUSED:
     case process.ENOTCONN:
+      console.log('mqclient '+err.message+'. retrying in '+aTime);///debugging
       setTimeout(function() {
+        try {
         that.socket.connect(that.port, that.host);
+        } catch (err) {
+          console.log('mqclient error on retry: '+err.message);
+        }
       }, aTime*1000);
-      console.log('mqclient '+err.message+'. retrying...');///debugging
       break;
     default:
       that.event_error(err.message);
@@ -91,7 +95,7 @@ function MqClient() {
     var aFn = that['event_'+aReq.op];
     switch (aReq.op) {
     case 'registered': aFn(aReq.aliases);                            break;
-    case 'added':      aFn();                                        break;
+    case 'added':      aFn(aReq.node);                               break;
     case 'deliver':    aFn(aReq.id, aReq.from, aReq._buf, aReq.etc); break;
     case 'ack':        aFn(aReq.id, aReq.type);                      break;
     case 'info':       aFn(aReq.info);                               break;
@@ -112,7 +116,7 @@ MqClient.prototype = {
 
   sParams: {
     registered: {  },
-    added:      {  },
+    added:      { node:'string' },
     deliver:    { id:'string', from:'string' },
     ack:        { id:'string', type:'string' },
     info:       { info:'string' },
