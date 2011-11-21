@@ -684,7 +684,7 @@ Link.prototype = {
           function fUidCb(err, uid, list) {
             if (err) throw err;
             for (var aN in list)
-              if (uid+aN !== that.node)
+              if (uid in iReq.to || uid+aN !== that.node)
                 aTo[uid+aN] = list[aN];
             if (--aToCount > 0)
               return;
