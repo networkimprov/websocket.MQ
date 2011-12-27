@@ -127,9 +127,9 @@ MqClient.prototype = {
 
   connect: function(iHost, iPort, iCallback) {
     this.host = iHost;
-    this.port = iPort;
+    this.port = iPort || 8008;
     this.on('connect', iCallback);
-    this.socket.connect(iPort, iHost);
+    this.socket.connect(this.port, this.host);
   } ,
 
   close: function() {
