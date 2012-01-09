@@ -163,17 +163,33 @@ RegDb.prototype = {
       else if (iNewNode in this.db.uid[iUid].nodes)
         var aErr = 'new nodename exists';
     if (aErr) {
-      process.nextTick(function() { iCallback(new Error(aErr)) });
+      if (aErr === 'user exists' || aErr === 'new nodename exists') {
+        var a1 = this.db.uid[iUid].aliases.join(' ');
+        var a2 = this.db.uid[iUid].nodes[iNewNode];
+      }
+      process.nextTick(function() { iCallback(new Error(aErr), a1, a2) });
       return;
     }
-    if (aHas && iAliases && this.db.uid[iUid].aliases)
+    if (!aHas)
+      this.db.uid[iUid] = { nodes:{}, aliases:[] };
+    if (iNewNode && !this.db.uid[iUid].nodes[iNewNode]) {
+      var aOffset = [];
+      for (var a in this.db.uid[iUid].nodes)
+        aOffset[this.db.uid[iUid].nodes[a]] = true;
+      if (aOffset.length < 100) {
+        this.db.uid[iUid].nodes[iNewNode] = aOffset.length;
+      } else {
+        for (var a=0; a < 100 && aOffset[a]; ++a) {}
+        if (a === 100) {
+          process.nextTick(function() { iCallback(new Error('no offsets available')) });
+          return;
+        }
+        this.db.uid[iUid].nodes[iNewNode] = a;
+      }
+    }
+    if (iAliases) {
       for (var a=0; a < this.db.uid[iUid].aliases.length; ++a)
         delete this.db.alias[this.db.uid[iUid].aliases[a]];
-    if (!aHas)
-      this.db.uid[iUid] = { nodes:{}, aliases:null };
-    if (iNewNode)
-      this.db.uid[iUid].nodes[iNewNode] = true;
-    if (iAliases) {
       var aAccept = iAliases.split(/\s+/);
       for (var a=aAccept.length-1; a >= 0; --a) {
         if (aAccept[a].length === 0 || aAccept[a] in this.db.alias)
@@ -186,7 +202,7 @@ RegDb.prototype = {
     var that = this;
     fs.writeFileSync(this.file, JSON.stringify(this.db), 'ascii');
     process.nextTick(function() {
-      iCallback(null, aAccept && aAccept.join(' '));
+      iCallback(null, aAccept && aAccept.join(' '), iNewNode ? that.db.uid[iUid].nodes[iNewNode] : undefined);
     });
   } ,
 

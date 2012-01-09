@@ -94,8 +94,8 @@ function MqClient() {
     }
     var aFn = that['event_'+aReq.op];
     switch (aReq.op) {
-    case 'registered': aFn(aReq.aliases);                            break;
-    case 'added':      aFn(aReq.node);                               break;
+    case 'registered': aFn(aReq.aliases, aReq.error);                break;
+    case 'added':      aFn(aReq.offset, aReq.error);                 break;
     case 'deliver':    aFn(aReq.id, aReq.from, aReq._buf, aReq.etc); break;
     case 'ack':        aFn(aReq.id, aReq.type);                      break;
     case 'info':       aFn(aReq.info);                               break;
@@ -116,7 +116,7 @@ MqClient.prototype = {
 
   sParams: {
     registered: {  },
-    added:      { node:'string' },
+    added:      {  },
     deliver:    { id:'string', from:'string' },
     ack:        { id:'string', type:'string' },
     info:       { info:'string' },

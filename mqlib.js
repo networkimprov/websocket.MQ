@@ -119,7 +119,7 @@ var sLock = {
 };
 
 function _sendNext(iNode) {
-  if (!(iNode in sActive) || sQueues[iNode].length === 0)
+  if (!(iNode in sActive) || sQueues[iNode].pause || sQueues[iNode].length === 0)
     return;
   ++sQueues[iNode].tries;
   var aN = sQueues[iNode].next;
@@ -136,14 +136,15 @@ function _sendNext(iNode) {
   });
 }
 
-function _newQueue(iUid, ioArray) {
+function _newQueue(iUid, ioArray, iPrior) {
   ioArray.sort();
   for (var a=0; a < ioArray.length; ++a)
     sMsgCache.link(ioArray[a]);
   ioArray.timer = null;
   ioArray.tries = 0;
   ioArray.next = 0;
-  ioArray.quiet = null;
+  ioArray.quiet = iPrior.quiet;
+  ioArray.pause = iPrior.pause;
   ioArray.uid = iUid;
   if (!sPending[iUid])
     sPending[iUid] = { q:0, m:{} };
@@ -176,28 +177,26 @@ function delPending(iUid, iId) {
     delete sPending[iUid].m[iId];
 }
 
-function startQueue(iNode, iUid) {
+function startQueue(iNode, iUid, iPause) {
   if (!sQueues[iNode])
     sQueues[iNode] = { };
+  sQueues[iNode].pause = iPause;
   if ('tries' in sQueues[iNode]) {
-    sQuiet.remove(sQueues[iNode].quiet);
-    sQueues[iNode].quiet = null;
-    if (typeof sQueues[iNode].tries === 'number')
-      _sendNext(iNode);
+    if (sQueues[iNode].quiet) {
+      sQuiet.remove(sQueues[iNode].quiet);
+      sQueues[iNode].quiet = null;
+    }
+    _sendNext(iNode);
     return;
   }
-  if (!sLock.read(iNode, function(){startQueue(iNode)} ))
+  if (!sLock.read(iNode, function(){startQueue(iNode, iUid, iPause)} ))
     return;
   fs.readdir(getPath(iNode), function(err, array) {
     if (err && err.errno !== process.ENOENT) throw err;
     if ('tries' in sQueues[iNode])
       throw new Error('queue already exists');
-    var aQ = sQueues[iNode].quiet;
-    sQueues[iNode] = _newQueue(iUid, array || []);
-    if (aQ)
-      sQueues[iNode].quiet = aQ;
-    else if (sQueues[iNode].length)
-      _sendNext(iNode);
+    sQueues[iNode] = _newQueue(iUid, array || [], sQueues[iNode]);
+    _sendNext(iNode);
     sLock.free(iNode);
   });
 }
@@ -266,11 +265,16 @@ function deQueueItem(iNode, iId) {
     sQueues[iNode].next = sQueues[iNode].length = 0;
 }
 
-function copyQueue(iNode, iNewNode, iCallback) {
-  var aOk = sQueues[iNode] && 'tries' in sQueues[iNode] && !sQueues[iNode].onCopy;
+function copyQueue(iUid, iNode, iNewNode, iCallback) {
+  if (!sQueues[iNode] || !('tries' in sQueues[iNode]) || sQueues[iNode].onCopy) {
+    if (!sQueues[iNode])
+      startQueue(iNode, iUid, true);
+    setTimeout(copyQueue, 100, iUid, iNode, iNewNode, iCallback);
+    return;
+  }
   for (var any in sPending[sQueues[iNode].uid].m) break;
-  if (!aOk || !any && !sQueues[iNode].length) {
-    process.nextTick(function() { iCallback(aOk) });
+  if (!any && !sQueues[iNode].length) {
+    process.nextTick(iCallback);
   } else if (any) {
     sQueues[iNode].pending = {};
     for (var a in sPending[sQueues[iNode].uid].m)
@@ -283,7 +287,7 @@ function copyQueue(iNode, iNewNode, iCallback) {
   }
   function fDone() {
     delete sQueues[iNode].onCopy;
-    iCallback(true);
+    iCallback();
   }
 }
 
@@ -469,7 +473,7 @@ function Link(iConn) {
   this.loginTimer = setTimeout(function(that) {
     that.loginTimer = null;
     that.timeout();
-  }, 4000, this);
+  }, 6000, this);
   this.conn = iConn;
   this.uid = null;
   this.node = null;
@@ -503,7 +507,7 @@ Link.prototype = {
     if (typeof aReq.op !== 'string' || typeof this.params[aReq.op] === 'undefined')
       throw 'invalid request op';
 
-    if (aReq.op !== 'register' && aReq.op !== 'login' && !this.node)
+    if (!this.node && aReq.op !== 'register' && aReq.op !== 'login' && aReq.op !== 'addNode')
       throw 'illegal op on unauthenticated socket';
 
     for (var a in this.params[aReq.op]) {
@@ -537,7 +541,7 @@ Link.prototype = {
       if (!that.conn)
         return;
       if (err) {
-        that.conn.write(1, 'binary', makeMsg({op:'info', info:'reg fail: '+err.message}));
+        that.conn.write(1, 'binary', makeMsg({op:'registered', aliases:aliases, error:err.message}));
         return;
       }
       that.conn.write(1, 'binary', makeMsg({op:'registered', aliases:aliases}));
@@ -546,22 +550,35 @@ Link.prototype = {
 
   handle_addNode: function(iReq) {
     var that = this;
-    sRegSvc.reregister(iReq.userId, iReq.newNode, iReq.prevNode, null, function(err) {
-      if (!that.conn)
-        return;
-      if (err) {
-        that.conn.write(1, 'binary', makeMsg({op:'info', info:'addNode fail: '+err.message}));
-        return;
-      }
-      copyQueue(that.node, that.uid+iReq.newNode, function(ok) {
-        if (that.conn)
-          that.conn.write(1, 'binary', makeMsg(ok ? {op:'added', node:iReq.newNode} : {op:'info', info:'addNode queue busy'}));
+    if (!iReq.newNode) {
+      that.conn.write(1, 'binary', makeMsg({op:'added', error:'new nodename required'}));
+      return;
+    }
+    if (!that.uid)
+      sRegSvc.verify(iReq.userId, iReq.prevNode, function(err, ok) {
+        if (err || !ok) {
+          if (that.conn)
+            that.conn.write(1, 'binary', makeMsg({op:'added', error:'authentication failed'}));
+          return;
+        }
+        fCopy();
       });
-    });
+    else
+      fCopy();
+    function fCopy() {
+      copyQueue(iReq.userId, iReq.userId+iReq.prevNode, iReq.userId+iReq.newNode, function() {
+        sRegSvc.reregister(iReq.userId, iReq.newNode, iReq.prevNode, null, function(err, ignore, offset) {
+          if (that.conn)
+            that.conn.write(1, 'binary', makeMsg({op:'added', offset:offset, error: err ? err.message : undefined}));
+        });
+      });
+    }
   } ,
 
   handle_login: function(iReq) {
     var that = this;
+    clearTimeout(that.loginTimer);
+    that.loginTimer = null;
     sRegSvc.verify(iReq.userId, iReq.nodeId, function(err, ok) {
       if (!that.conn)
         return;
@@ -574,13 +591,11 @@ Link.prototype = {
         that.conn.close();
         return;
       }
-      clearTimeout(that.loginTimer);
-      that.loginTimer = null;
       that.uid = iReq.userId;
       that.node = aNode;
       sActive[aNode] = that;
       that.conn.write(1, 'binary', makeMsg({op:'info', info:'ok login'}));
-      startQueue(aNode);
+      startQueue(that.node, that.uid);
     });
   } ,
 
