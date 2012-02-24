@@ -356,7 +356,7 @@ function test() {
           var aLink = that.link;
           setTimeout(function() {
             if (that.link === aLink)
-              that.link.handleMessage(mq.makeMsg({op:'ack', type:'ok', id:aReq.id}));
+              that.link.handleMessage(mq.packMsg({op:'ack', type:'ok', id:aReq.id}));
           }, aT*5);
           if (aBuf in that.recv)
             ++that.recv[aBuf];
@@ -394,7 +394,7 @@ function test() {
     switch (iState) {
     case 0:
       aC.connect();
-      aC.link.handleMessage(mq.makeMsg({op:'login', nodeid:aC.id}));
+      aC.link.handleMessage(mq.packMsg({op:'login', nodeid:aC.id}));
       setTimeout(testLink, (Date.now()%10)*907, aC, iState+1);
       break;
     case  1: case  2: case  3: case  4: case  5: case  6: case  7: case  8: case  9: case 10:
@@ -403,7 +403,7 @@ function test() {
         break;
       var aTo = {}, aN = Date.now()%20+1;
       for (var a in sToList) { aTo[a] = sToList[a]; if (--aN === 0) break; }
-      var aMsg = mq.makeMsg({op:'post', to:sToList, id:(iState%10).toString()}, sMsgList[iState%10]);
+      var aMsg = mq.packMsg({op:'post', to:sToList, id:(iState%10).toString()}, sMsgList[iState%10]);
       aC.link.handleMessage(aMsg);
       setTimeout(testLink, (Date.now()%10)*807, aC, iState+1);
       break;

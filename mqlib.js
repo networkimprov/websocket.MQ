@@ -40,7 +40,7 @@ module.exports.quit = function() {
 
 module.exports.Link = Link;
 
-module.exports.makeMsg = makeMsg; // for in-process testing
+module.exports.packMsg = packMsg; // for in-process testing
 
 function writeAll(iFd, iBuf, iCallback) {
   fs.write(iFd, iBuf, 0, iBuf.length, null, function (err, written) {
@@ -62,7 +62,7 @@ function syncFile(iPath, iCallback) {
   });
 }
 
-function makeMsg(iJso, iData) {
+function packMsg(iJso, iData) {
   var aEtc = iJso.etc ? JSON.stringify(iJso.etc) : '';
   if (aEtc.length)
     iJso.etc = aEtc.length;
@@ -529,13 +529,13 @@ Link.prototype = {
     } catch (err) {
       if (!this.conn)
         return;
-      this.conn.write(1, 'binary', makeMsg({op:'quit', info:err.message || err}));
+      this.conn.write(1, 'binary', packMsg({op:'quit', info:err.message || err}));
       this.conn.close();
     }
   } ,
 
   timeout: function() {
-    this.conn.write(1, 'binary', makeMsg({op:'quit', info:'close timeout'}));
+    this.conn.write(1, 'binary', packMsg({op:'quit', info:'close timeout'}));
     this.conn.close();
   } ,
 
@@ -545,7 +545,7 @@ Link.prototype = {
       if (!that.conn)
         return;
       if (!that.node || err) {
-        that.conn.write(1, 'binary', makeMsg({op:'registered', etc:aliases, error:err ? err.message : undefined}));
+        that.conn.write(1, 'binary', packMsg({op:'registered', etc:aliases, error:err ? err.message : undefined}));
         return;
       }
       var aTo = {};
@@ -557,14 +557,14 @@ Link.prototype = {
   handle_addNode: function(iReq) {
     var that = this;
     if (!iReq.newNode) {
-      that.conn.write(1, 'binary', makeMsg({op:'added', error:'new nodename required'}));
+      that.conn.write(1, 'binary', packMsg({op:'added', error:'new nodename required'}));
       return;
     }
     if (!that.uid)
       sRegSvc.verify(iReq.userId, iReq.prevNode, function(err, ok) {
         if (err || !ok) {
           if (that.conn)
-            that.conn.write(1, 'binary', makeMsg({op:'added', error:'authentication failed'}));
+            that.conn.write(1, 'binary', packMsg({op:'added', error:'authentication failed'}));
           return;
         }
         fCopy();
@@ -575,7 +575,7 @@ Link.prototype = {
       copyQueue(iReq.userId, iReq.userId+iReq.prevNode, iReq.userId+iReq.newNode, function() {
         sRegSvc.reregister(iReq.userId, iReq.newNode, iReq.prevNode, null, function(err, ignore, offset) {
           if (that.conn)
-            that.conn.write(1, 'binary', makeMsg({op:'added', offset:offset, error: err ? err.message : undefined}));
+            that.conn.write(1, 'binary', packMsg({op:'added', offset:offset, error: err ? err.message : undefined}));
         });
       });
     }
@@ -593,14 +593,14 @@ Link.prototype = {
       else if (aNode in sActive) var aErr = 'node already active';
       else if (sShutdown)        var aErr = 'shutdown';
       if (aErr) {
-        that.conn.write(1, 'binary', makeMsg({op:'quit', info:aErr}));
+        that.conn.write(1, 'binary', packMsg({op:'quit', info:aErr}));
         that.conn.close();
         return;
       }
       that.uid = iReq.userId;
       that.node = aNode;
       sActive[aNode] = that;
-      that.conn.write(1, 'binary', makeMsg({op:'info', info:'ok login'}));
+      that.conn.write(1, 'binary', packMsg({op:'info', info:'ok login'}));
       startQueue(that.node, that.uid);
     });
   } ,
@@ -615,7 +615,7 @@ Link.prototype = {
     function aComplete(err) {
       if (err) {
         if (that.conn) {
-          that.conn.write(1, 'binary', makeMsg({op:'quit', info:err.message}));
+          that.conn.write(1, 'binary', packMsg({op:'quit', info:err.message}));
           that.conn.close();
         }
         return;
@@ -626,14 +626,14 @@ Link.prototype = {
         that.handle_post({id:iReq.id, to:aTo, etc:iReq.etc}, iBuf);
       } else {
         if (that.conn)
-          that.conn.write(1, 'binary', makeMsg({op:'ack', type:'ok', id:iReq.id}));
+          that.conn.write(1, 'binary', packMsg({op:'ack', type:'ok', id:iReq.id}));
       }
     }
   } ,
 
   _ackFail: function(iId, iErr, iOp) {
     if (this.conn)
-      this.conn.write(1, 'binary', makeMsg(iOp ? {op:iOp, error:iErr.message} : {op:'ack', type:'error', error:iErr.message, id:iId}));
+      this.conn.write(1, 'binary', packMsg(iOp ? {op:iOp, error:iErr.message} : {op:'ack', type:'error', error:iErr.message, id:iId}));
   } ,
 
   sLastId: 0,
@@ -685,7 +685,7 @@ Link.prototype = {
   _postSend: function(iReq, iBuf, iOp) {
     var that = this;
     var aId = this._makeId();
-    var aMsg = makeMsg({op:iOp || 'deliver', id:aId, from:that.uid, etc:iReq.etc}, iBuf);
+    var aMsg = packMsg({op:iOp || 'deliver', id:aId, from:that.uid, etc:iReq.etc}, iBuf);
     fs.open(sTempDir+aId, 'w', 0600, function(err, fd) {
       if (err) return that._ackFail(iReq.id, err, iOp);
       writeAll(fd, aMsg, function(err) { // attempt write to temp
@@ -720,7 +720,7 @@ Link.prototype = {
                 delPending(aUid, aId);
               delPending(that.uid, aId);
               if (that.conn && !iOp)
-                that.conn.write(1, 'binary', makeMsg({op:'ack', type:'ok', id:iReq.id}));
+                that.conn.write(1, 'binary', packMsg({op:'ack', type:'ok', id:iReq.id}));
               fs.unlink(sTempDir+aId, noop);
             }
           }
