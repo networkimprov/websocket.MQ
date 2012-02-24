@@ -63,13 +63,17 @@ function syncFile(iPath, iCallback) {
 }
 
 function makeMsg(iJso, iData) {
+  var aEtc = iJso.etc ? JSON.stringify(iJso.etc) : '';
+  if (aEtc.length)
+    iJso.etc = aEtc.length;
   var aReq = JSON.stringify(iJso);
   var aLen = (aReq.length.toString(16)+'   ').slice(0,4);
-  var aBuf = new Buffer(aLen.length + aReq.length + (iData ? iData.length : 0));
+  var aBuf = new Buffer(aLen.length + aReq.length + aEtc.length + (iData ? iData.length : 0));
   aBuf.write(aLen, 0);
   aBuf.write(aReq, aLen.length);
+  aBuf.write(aEtc, aLen.length + aReq.length);
   if (iData)
-    iData.copy(aBuf, aLen.length + aReq.length, 0);
+    iData.copy(aBuf, aLen.length + aReq.length + aEtc.length, 0);
   return aBuf;
 }
 
@@ -540,11 +544,13 @@ Link.prototype = {
     sRegSvc[this.node ? 'reregister' : 'register'](iReq.userId, iReq.newNode, null, iReq.aliases, function(err, aliases) {
       if (!that.conn)
         return;
-      if (err) {
-        that.conn.write(1, 'binary', makeMsg({op:'registered', aliases:aliases, error:err.message}));
+      if (!that.node || err) {
+        that.conn.write(1, 'binary', makeMsg({op:'registered', etc:aliases, error:err ? err.message : undefined}));
         return;
       }
-      that.conn.write(1, 'binary', makeMsg({op:'registered', aliases:aliases}));
+      var aTo = {};
+      aTo[that.uid] = 1;
+      that._postSend({to:aTo, etc:aliases}, null, 'registered');
     });
   } ,
 
@@ -625,9 +631,9 @@ Link.prototype = {
     }
   } ,
 
-  _ackFail: function(iId, iErr) {
+  _ackFail: function(iId, iErr, iOp) {
     if (this.conn)
-      this.conn.write(1, 'binary', makeMsg({op:'ack', type:'error: '+iErr.message, id:iId}));
+      this.conn.write(1, 'binary', makeMsg(iOp ? {op:iOp, error:iErr.message} : {op:'ack', type:'error', error:iErr.message, id:iId}));
   } ,
 
   sLastId: 0,
@@ -676,17 +682,17 @@ Link.prototype = {
     }
   } ,
 
-  _postSend: function(iReq, iBuf) {
+  _postSend: function(iReq, iBuf, iOp) {
     var that = this;
     var aId = this._makeId();
-    var aMsg = makeMsg({op:'deliver', id:aId, from:that.uid, etc:iReq.etc}, iBuf);
+    var aMsg = makeMsg({op:iOp || 'deliver', id:aId, from:that.uid, etc:iReq.etc}, iBuf);
     fs.open(sTempDir+aId, 'w', 0600, function(err, fd) {
-      if (err) return that._ackFail(iReq.id, err);
+      if (err) return that._ackFail(iReq.id, err, iOp);
       writeAll(fd, aMsg, function(err) { // attempt write to temp
-        if (err) { fs.close(fd, noop); return that._ackFail(iReq.id, err); }
+        if (err) { fs.close(fd, noop); return that._ackFail(iReq.id, err, iOp); }
         fs.fsync(fd, function(err) {
           fs.close(fd, noop);
-          if (err) return that._ackFail(iReq.id, err);
+          if (err) return that._ackFail(iReq.id, err, iOp);
           sMsgCache.put(aId, aMsg);
           var aTo = {}, aToCount = 1;
           for (var aUid in iReq.to) {
@@ -713,7 +719,7 @@ Link.prototype = {
               for (var aUid in iReq.to)
                 delPending(aUid, aId);
               delPending(that.uid, aId);
-              if (that.conn)
+              if (that.conn && !iOp)
                 that.conn.write(1, 'binary', makeMsg({op:'ack', type:'ok', id:iReq.id}));
               fs.unlink(sTempDir+aId, noop);
             }

@@ -94,10 +94,10 @@ function MqClient() {
     }
     var aFn = that['event_'+aReq.op];
     switch (aReq.op) {
-    case 'registered': aFn(aReq.aliases, aReq.error);                break;
+    case 'registered': aFn(aReq.etc, aReq.id, aReq.error);           break;
     case 'added':      aFn(aReq.offset, aReq.error);                 break;
     case 'deliver':    aFn(aReq.id, aReq.from, aReq._buf, aReq.etc); break;
-    case 'ack':        aFn(aReq.id, aReq.type);                      break;
+    case 'ack':        aFn(aReq.id, aReq.type, aReq.error);          break;
     case 'info':       aFn(aReq.info);                               break;
     case 'quit':       aFn(aReq.info);                               break;
     }
