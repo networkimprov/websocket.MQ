@@ -63,7 +63,7 @@ function syncFile(iPath, iCallback) {
 }
 
 function packMsg(iJso, iData) {
-  var aEtc = iJso.etc ? JSON.stringify(iJso.etc) : '';
+  var aEtc = typeof iJso.etc === 'object' && iJso.etc ? JSON.stringify(iJso.etc) : '';
   if (aEtc.length)
     iJso.etc = aEtc.length;
   var aReq = JSON.stringify(iJso);
@@ -648,9 +648,6 @@ Link.prototype = {
   } ,
 
   handle_post: function(iReq, iBuf) {
-    for (var aName in iReq.to) break;
-    if (!aName)
-      throw 'missing to members';
     var that = this;
     var aCbErr, aCbCount = 0;
     for (var a in iReq.to) {
@@ -713,6 +710,8 @@ Link.prototype = {
               ++aToCount;
               queueItem(aN, aId, fToCb);
             }
+            if (aToCount === 0)
+              fToCb();
             function fToCb() {
               if (--aToCount > 0)
                 return;
