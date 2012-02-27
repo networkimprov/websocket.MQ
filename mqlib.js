@@ -525,6 +525,7 @@ Link.prototype = {
     var aBuf = iMsg.length > aJsEnd ? iMsg.slice(aJsEnd, iMsg.length) : null;
 
     this['handle_'+aReq.op](aReq, aBuf);
+    console.log(aReq);
 
     } catch (err) {
       if (!this.conn)
