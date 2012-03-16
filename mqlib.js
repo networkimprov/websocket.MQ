@@ -638,13 +638,17 @@ Link.prototype = {
   } ,
 
   sLastId: 0,
-  sLastSubId: 0,
+  sLastSubId: 1000,
   _makeId: function() {
     var aId = Date.now();
-    if (aId === Link.prototype.sLastId)
-      return aId +'-'+ ++Link.prototype.sLastSubId;
-    Link.prototype.sLastId = aId;
-    Link.prototype.sLastSubId = 0;
+    if (aId < this.sLastId)
+      console.log('system clock went backwards by '+(this.sLastId-aId)+' ms');
+    if (this.sLastSubId === 9999)
+      throw new Error('queue id suffix maxed out');
+    if (aId <= this.sLastId)
+      return aId +'-'+ ++this.sLastSubId;
+    this.sLastId = aId;
+    this.sLastSubId = 1000;
     return aId.toString();
   } ,
 
