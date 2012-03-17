@@ -123,7 +123,7 @@ var sLock = {
 };
 
 function _sendNext(iNode) {
-  if (!(iNode in sActive) || sQueues[iNode].pause || sQueues[iNode].length === 0)
+  if (!(iNode in sActive) || sQueues[iNode].length === 0)
     return;
   ++sQueues[iNode].tries;
   var aN = sQueues[iNode].next;
@@ -148,7 +148,6 @@ function _newQueue(iUid, ioArray, iPrior) {
   ioArray.tries = 0;
   ioArray.next = 0;
   ioArray.quiet = iPrior.quiet;
-  ioArray.pause = iPrior.pause;
   ioArray.uid = iUid;
   if (!sPending[iUid])
     sPending[iUid] = { q:0, m:{} };
@@ -181,28 +180,30 @@ function delPending(iUid, iId) {
     delete sPending[iUid].m[iId];
 }
 
-function startQueue(iNode, iUid, iPause) {
-  if (!sQueues[iNode])
+function startQueue(iNode, iUid, iQuiet) {
+  if (!sQueues[iNode]) {
     sQueues[iNode] = { };
-  sQueues[iNode].pause = iPause;
-  if ('tries' in sQueues[iNode]) {
-    if (sQueues[iNode].quiet) {
-      sQuiet.remove(sQueues[iNode].quiet);
-      sQueues[iNode].quiet = null;
+    if (sLock.read(iNode, fRead))
+      fRead();
+    function fRead() {
+      fs.readdir(getPath(iNode), function(err, array) {
+        if (err && err.errno !== process.ENOENT) throw err;
+        sQueues[iNode] = _newQueue(iUid, array || [], sQueues[iNode]);
+        if (iQuiet && !(iNode in sActive) && !sQueues[iNode].quiet)
+          sQueues[iNode].quiet = sQuiet.append(iNode);
+        else
+          _sendNext(iNode);
+        sLock.free(iNode);
+      });
     }
-    _sendNext(iNode);
     return;
   }
-  if (!sLock.read(iNode, function(){startQueue(iNode, iUid, iPause)} ))
-    return;
-  fs.readdir(getPath(iNode), function(err, array) {
-    if (err && err.errno !== process.ENOENT) throw err;
-    if ('tries' in sQueues[iNode])
-      throw new Error('queue already exists');
-    sQueues[iNode] = _newQueue(iUid, array || [], sQueues[iNode]);
+  if (sQueues[iNode].quiet) {
+    sQuiet.remove(sQueues[iNode].quiet);
+    sQueues[iNode].quiet = null;
+  }
+  if ('tries' in sQueues[iNode])
     _sendNext(iNode);
-    sLock.free(iNode);
-  });
 }
 
 function stopQueue(iNode) {
@@ -272,7 +273,7 @@ function deQueueItem(iNode, iId) {
 function copyQueue(iUid, iNode, iNewNode, iCallback) {
   if (!sQueues[iNode] || !('tries' in sQueues[iNode]) || sQueues[iNode].onCopy) {
     if (!sQueues[iNode])
-      startQueue(iNode, iUid, true);
+      startQueue(iNode, iUid, 'quiet');
     setTimeout(copyQueue, 100, iUid, iNode, iNewNode, iCallback);
     return;
   }
