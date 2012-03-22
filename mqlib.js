@@ -708,24 +708,20 @@ Link.prototype = {
 
     function aSend(err, list, members) {
       if (err) {
-        if (!aCbErr) aCbErr = err;
-        else aCbErr.message += ', '+err.message;
+        if (!aCbErr) aCbErr = '';
+        aCbErr += (aCbErr && '\n') + err.message;
       } else {
         for (var a in members)
           if (a !== that.uid || iReq.to[list] === 3)
             iReq.to[a] = members[a];
       }
       delete iReq.to[list];
-      if (--aCbCount > 0)
-        return;
-      if (aCbErr)
-        that._ackFail(iReq.id, aCbErr);
-      else
-        that._postSend(iReq, iBuf, null);
+      if (--aCbCount === 0)
+        that._postSend(iReq, iBuf, null, aCbErr);
     }
   } ,
 
-  _postSend: function(iReq, iBuf, iOp) {
+  _postSend: function(iReq, iBuf, iOp, iAckErr) {
     var that = this;
     var aId = this._makeId();
     var aMsg = packMsg({op:iOp || 'deliver', id:aId, from:that.uid, etc:iReq.etc}, iBuf);
@@ -737,7 +733,7 @@ Link.prototype = {
           fs.close(fd, noop);
           if (err) return that._ackFail(iReq.id, err, iOp);
           sMsgCache.put(aId, aMsg);
-          var aTo = {}, aToCount = 1, aAckErr;
+          var aTo = {}, aToCount = 1;
           for (var aUid in iReq.to) {
             ++aToCount;
             addPending(aUid, aId);
@@ -748,8 +744,8 @@ Link.prototype = {
           function fUidCb(err, uid, list) {
             if (err) {
               console.log(err.message);
-              if (!aAckErr) aAckErr = '';
-              aAckErr += (aAckErr && '\n') + err.message;
+              if (!iAckErr) iAckErr = '';
+              iAckErr += (iAckErr && '\n') + err.message;
             } else {
               for (var aN in list)
                 if (uid in iReq.to || uid+aN !== that.node)
@@ -770,7 +766,7 @@ Link.prototype = {
                 delPending(aUid, aId);
               delPending(that.uid, aId);
               if (that.conn && !iOp)
-                that.conn.write(1, 'binary', packMsg({op:'ack', type:'ok', id:iReq.id, error:aAckErr}));
+                that.conn.write(1, 'binary', packMsg({op:'ack', type:'ok', id:iReq.id, error:iAckErr}));
               fs.unlink(sTempDir+aId, noop);
             }
           }
