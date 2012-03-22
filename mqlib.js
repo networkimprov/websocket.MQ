@@ -746,10 +746,15 @@ Link.prototype = {
           addPending(that.uid, aId);
           sRegSvc.getNodes(that.uid, fUidCb);
           function fUidCb(err, uid, list) {
-            if (err) throw err;
-            for (var aN in list)
-              if (uid in iReq.to || uid+aN !== that.node)
-                aTo[uid+aN] = uid in iReq.to ? iReq.to[uid] : 1;
+            if (err) {
+              console.log(err.message);
+              if (!aAckErr) aAckErr = '';
+              aAckErr += (aAckErr && '\n') + err.message;
+            } else {
+              for (var aN in list)
+                if (uid in iReq.to || uid+aN !== that.node)
+                  aTo[uid+aN] = uid in iReq.to ? iReq.to[uid] : 1;
+            }
             if (--aToCount > 0)
               return;
             for (var aN in aTo) {
@@ -765,7 +770,7 @@ Link.prototype = {
                 delPending(aUid, aId);
               delPending(that.uid, aId);
               if (that.conn && !iOp)
-                that.conn.write(1, 'binary', packMsg({op:'ack', type:'ok', id:iReq.id}));
+                that.conn.write(1, 'binary', packMsg({op:'ack', type:'ok', id:iReq.id, error:aAckErr}));
               fs.unlink(sTempDir+aId, noop);
             }
           }
