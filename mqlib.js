@@ -712,9 +712,11 @@ Link.prototype = {
         aCbErr += (aCbErr && '\n') + err.message;
       } else {
         for (var a in members)
-          if (a !== that.uid || iReq.to[list] === 3)
-            iReq.to[a] = members[a];
+          if (a !== that.uid)
+            iReq.to[a] = 1;
       }
+      if (iReq.to[list] === 3)
+        iReq.to[that.uid] = 1;
       delete iReq.to[list];
       if (--aCbCount === 0)
         that._postSend(iReq, iBuf, null, aCbErr);
