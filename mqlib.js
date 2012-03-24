@@ -65,7 +65,7 @@ function syncFile(iPath, iCallback) {
 }
 
 function packMsg(iJso, iData) {
-  var aEtc = typeof iJso.etc === 'object' && iJso.etc ? JSON.stringify(iJso.etc) : '';
+  var aEtc = 'etc' in iJso && typeof iJso.etc !== 'number' ? JSON.stringify(iJso.etc) : '';
   if (aEtc.length)
     iJso.etc = aEtc.length;
   var aReq = JSON.stringify(iJso);

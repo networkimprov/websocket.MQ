@@ -5,7 +5,7 @@ var net = require('net');
 var WsStream = require('./wsstream/wsstream');
 
 function packMsg(iJso, iData) {
-  var aEtc = iJso.etc ? JSON.stringify(iJso.etc) : '';
+  var aEtc = 'etc' in iJso ? JSON.stringify(iJso.etc) : '';
   if (aEtc.length)
     iJso.etc = aEtc.length;
   var aReq = JSON.stringify(iJso);
