@@ -725,6 +725,9 @@ Link.prototype = {
 
   _postSend: function(iReq, iBuf, iOp, iAckErr) {
     var that = this;
+    for (var any in iReq.to) break;
+    if (!any && iReq.noNodes)
+      return that._ackFail(iReq.id, {message:'msg lacks recipients'}, iOp);
     var aId = this._makeId();
     var aMsg = packMsg({op:iOp || 'deliver', id:aId, from:that.uid, etc:iReq.etc}, iBuf);
     fs.open(sTempDir+aId, 'w', 0600, function(err, fd) {
@@ -735,14 +738,17 @@ Link.prototype = {
           fs.close(fd, noop);
           if (err) return that._ackFail(iReq.id, err, iOp);
           sMsgCache.put(aId, aMsg);
-          var aTo = {}, aToCount = 1;
+          var aTo = {}, aToCount = 0;
           for (var aUid in iReq.to) {
             ++aToCount;
             addPending(aUid, aId);
             sRegSvc.getNodes(aUid, fUidCb);
           }
-          addPending(that.uid, aId);
-          sRegSvc.getNodes(that.uid, fUidCb);
+          if (!iReq.noNodes && !(that.uid in iReq.to)) {
+            ++aToCount;
+            addPending(that.uid, aId);
+            sRegSvc.getNodes(that.uid, fUidCb);
+          }
           function fUidCb(err, uid, list) {
             if (err) {
               console.log(err.message);
@@ -766,7 +772,8 @@ Link.prototype = {
                 return;
               for (var aUid in iReq.to)
                 delPending(aUid, aId);
-              delPending(that.uid, aId);
+              if (!iReq.noNodes && !(that.uid in iReq.to))
+                delPending(that.uid, aId);
               if (that.conn && !iOp)
                 that.conn.write(1, 'binary', packMsg({op:'ack', type:'ok', id:iReq.id, error:iAckErr}));
               fs.unlink(sTempDir+aId, noop);
