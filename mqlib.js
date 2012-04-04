@@ -663,7 +663,7 @@ Link.prototype = {
         if (err) return fComplete(err);
         var aTo = {};
         aTo[uid] = 1;
-        that._postSend({op:'post', to:aTo, etc:iReq.etc}, iBuf, null, fComplete);
+        that._postSend({op:'post', to:aTo, etc:iReq.etc, noNodes:1}, iBuf, null, fComplete);
       });
       break;
     case 'add':
