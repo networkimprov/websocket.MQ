@@ -250,20 +250,25 @@ RegDb.prototype = {
     });
   } ,
 
+  listInvite: function(iName, iBy, iAlias,  iCallback) { this._listMod('in', iName, iBy, iAlias,  iCallback); } ,
   listAdd:    function(iName, iBy, iMember, iCallback) { this._listMod('ad', iName, iBy, iMember, iCallback); } ,
   listRemove: function(iName, iBy, iMember, iCallback) { this._listMod('rm', iName, iBy, iMember, iCallback); } ,
   //listRenew:  function(iName, iBy, iMember, iCallback) { this._listMod('nw', iName, iBy, iMember, iCallback); } ,
 
   _listMod: function(iOp, iName, iBy, iMember, iCallback) {
     var aHasB, aHasM, aHasL = iName in this.db.list;
-    if (iOp === 'rm') {
+    switch (iOp) {
+    case 'rm':
       aHasB = aHasL && iBy in this.db.list[iName];
       aHasM = aHasL && iMember in this.db.list[iName];
-    } else {
+      break;
+    case 'ad':
+    case 'in':
       aHasB = iBy in (aHasL ? this.db.list[iName] : this.db.uid);
-      aHasM = iMember in this.db.uid;
+      aHasM = iMember in (iOp === 'ad' ? this.db.uid : this.db.alias);
       aHasL = true;
-    } /*else if (iOp === 'nw') {
+      break;
+    /*case 'nw':
       for (var a in iMember) {
         if (!(a in this.db.uid)) {
           iMember = a;
@@ -272,21 +277,28 @@ RegDb.prototype = {
         iMember[a] = 1;
       }
       var aHasM = a && iMember !== a;
-    }*/
+      break;*/
+    default:
+      throw new Error('invalid _listMod() op '+iOp);
+    }
 
     if (!aHasL || !aHasB || !aHasM) {
       process.nextTick(function() {
-        var aEr = (!aHasL ? 'list '+iName : 'uid '+ (!aHasB ? 'by '+iBy : 'member '+iMember)) +' not found';
+        var aMethod = 'list'+ (iOp === 'in' ? 'Invite' : iOp === 'ad' ? 'Add' : 'Remove');
+        var aEr = aMethod + ' list '+iName + (!aHasL ? '' : !aHasB ? ' by '+iBy : ' member '+iMember) +' not found';
         iCallback(new Error(aEr));
       });
       return;
     }
+    var aReturn;
     switch (iOp) {
+    case 'in':
     case 'ad':
       if (!this.db.list[iName])
         this.db.list[iName] = {};
+      aReturn = iOp === 'in' ? this.db.alias[iMember] : this.db.list[iName][iMember];
       this.db.list[iName][iBy] = 1;
-      this.db.list[iName][iMember] = 1;
+      this.db.list[iName][iOp === 'in' ? this.db.alias[iMember] : iMember] = iOp === 'in' ? iMember : 1;
       break;
     case 'rm':
       delete this.db.list[iName][iMember];
@@ -299,7 +311,7 @@ RegDb.prototype = {
       break;*/
     }
     fs.writeFileSync(this.file, JSON.stringify(this.db), 'ascii');
-    process.nextTick(iCallback);
+    process.nextTick(function() { iCallback(null, aReturn) });
   } ,
 
   listLookup: function(iName, iBy, iCallback) {
@@ -311,7 +323,10 @@ RegDb.prototype = {
       });
       return;
     }
-    var aList = this.db.list[iName];
+    var aList = {};
+    for (var a in this.db.list[iName])
+      if (this.db.list[iName][a] === 1)
+        aList[a] = 1;
     process.nextTick(function() {
       iCallback(null, iName, aList);
     });

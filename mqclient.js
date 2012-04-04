@@ -96,6 +96,7 @@ function MqClient() {
     switch (aReq.op) {
     case 'registered': aFn(aReq.etc, aReq.id, aReq.error);           break;
     case 'added':      aFn(aReq.offset, aReq.error);                 break;
+    case 'listEdited': aFn(aReq.id, aReq.from, aReq.etc);            break;
     case 'deliver':    aFn(aReq.id, aReq.from, aReq._buf, aReq.etc); break;
     case 'ack':        aFn(aReq.id, aReq.type, aReq.error);          break;
     case 'info':       aFn(aReq.info);                               break;
@@ -117,6 +118,7 @@ MqClient.prototype = {
   sParams: {
     registered: {  },
     added:      {  },
+    listEdited: { id:'string', from:'string', etc:'object' },
     deliver:    { id:'string', from:'string' },
     ack:        { id:'string', type:'string' },
     info:       { info:'string' },
@@ -156,8 +158,8 @@ MqClient.prototype = {
     this.ws.write(1, 'binary', aMsg);
   } ,
 
-  listEdit: function(iTo, iType, iMember, iId, iEtc, iMsg) {
-    var aMsg = packMsg({op:'listEdit', to:iTo, type:iType, member:iMember, id:iId, etc:iEtc}, iMsg);
+  listEdit: function(iTo, iType, iMember, iId, iEtc) {
+    var aMsg = packMsg({op:'listEdit', to:iTo, type:iType, member:iMember, id:iId, etc:iEtc}, null);
     this.ws.write(1, 'binary', aMsg);
   } ,
 

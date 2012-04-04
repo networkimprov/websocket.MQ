@@ -560,10 +560,9 @@ Link.prototype = {
     if (!this.node && aReq.op !== 'register' && aReq.op !== 'login' && aReq.op !== 'addNode')
       throw 'illegal op on unauthenticated socket';
 
-    for (var a in this.params[aReq.op]) {
+    for (var a in this.params[aReq.op])
       if (typeof aReq[a] !== this.params[aReq.op][a])
         throw aReq.op+' request missing param '+a;
-    }
 
     if (aReq.op !== 'listEdit' && aReq.op !== 'post' && aReq.op !== 'ping' && iMsg.length > aJsEnd)
       throw 'message body disallowed for '+aReq.op;
@@ -655,28 +654,40 @@ Link.prototype = {
   } ,
 
   handle_listEdit: function(iReq, iBuf) {
-    switch (iReq.type) {
-    case 'add':    sRegSvc.listAdd(iReq.to, this.uid, iReq.member, aComplete); break;
-    case 'remove': sRegSvc.listRemove(iReq.to, this.uid, iReq.member, aComplete); break;
-    default:       aComplete(new Error('invalid listEdit type: '+iReq.type));
-    }
     var that = this;
-    function aComplete(err) {
-      if (err) {
-        if (that.conn) {
-          that.conn.write(1, 'binary', packMsg({op:'quit', info:err.message}));
-          that.conn.close();
-        }
+    var aListMsg = {list:iReq.to, op:iReq.type, date:(new Date).toISOString()};
+    switch (iReq.type) {
+    case 'invite':
+      aListMsg.alias = iReq.member;
+      sRegSvc.listInvite(iReq.to, this.uid, iReq.member, function(err, uid) {
+        if (err) return fComplete(err);
+        var aTo = {};
+        aTo[uid] = 1;
+        that._postSend({op:'post', to:aTo, etc:iReq.etc}, iBuf, null, fComplete);
+      });
+      break;
+    case 'add':
+      aListMsg.uid = iReq.member;
+      sRegSvc.listAdd(iReq.to, this.uid, iReq.member, function(err, alias) {
+        aListMsg.alias = alias;
+        fComplete(err);
+      });
+      break;
+    case 'remove':
+      aListMsg.uid = iReq.member;
+      sRegSvc.listRemove(iReq.to, this.uid, iReq.member, fComplete);
+      break;
+    default:
+      fComplete(new Error('invalid listEdit type: '+iReq.type));
+    }
+    function fComplete(err, toErr) {
+      if (err || toErr) {
+        that._ack(iReq.id, err, toErr);
         return;
       }
-      if (iBuf) {
-        var aTo = {};
-        aTo[iReq.to] = 3;
-        that.handle_post({op:'post', id:iReq.id, to:aTo, etc:iReq.etc}, iBuf);
-      } else {
-        if (that.conn)
-          that.conn.write(1, 'binary', packMsg({op:'ack', type:'ok', id:iReq.id}));
-      }
+      var aTo = {};
+      aTo[iReq.to] = 3;
+      that.handle_post({op:'listEdit', id:iReq.id, to:aTo, etc:aListMsg}, null);
     }
   } ,
 
