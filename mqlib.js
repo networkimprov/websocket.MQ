@@ -620,11 +620,15 @@ Link.prototype = {
     else
       fCopy();
     function fCopy() {
-      copyQueue(iReq.userId, iReq.userId+iReq.prevNode, iReq.userId+iReq.newNode, function() {
-        sRegSvc.reregister(iReq.userId, iReq.newNode, iReq.prevNode, null, function(err, ignore, offset) {
+      sRegSvc.reregister(iReq.userId, iReq.newNode, iReq.prevNode, null, function(err, ignore, offset) {
+        if (offset)
+          copyQueue(iReq.userId, iReq.userId+iReq.prevNode, iReq.userId+iReq.newNode, fRespond);
+        else
+          fRespond();
+        function fRespond() {
           if (that.conn)
             that.conn.write(1, 'binary', packMsg({op:'added', offset:offset, error: err ? err.message : undefined}));
-        });
+        }
       });
     }
   } ,
