@@ -608,21 +608,24 @@ Link.prototype = {
       that.conn.write(1, 'binary', packMsg({op:'added', error:'new nodename required'}));
       return;
     }
-    if (!that.uid)
-      sRegSvc.verify(iReq.userId, iReq.prevNode, function(err, ok) {
-        if (err || !ok) {
+    var aThatNode = that.node;
+    var aThatUid = that.uid || iReq.userId;
+    if (!that.node)
+      sRegSvc.verify(iReq.userId, iReq.prevNode, function(err, offset) {
+        if (err) {
           if (that.conn)
-            that.conn.write(1, 'binary', packMsg({op:'added', error:'authentication failed'}));
+            that.conn.write(1, 'binary', packMsg({op:'added', error:err.message}));
           return;
         }
+        aThatNode = aThatUid+','+offset;
         fCopy();
       });
     else
       fCopy();
     function fCopy() {
-      sRegSvc.reregister(iReq.userId, iReq.newNode, iReq.prevNode, null, function(err, ignore, offset) {
+      sRegSvc.reregister(aThatUid, iReq.newNode, iReq.prevNode, null, function(err, ignore, offset) {
         if (offset)
-          copyQueue(iReq.userId, iReq.userId+iReq.prevNode, iReq.userId+iReq.newNode, fRespond);
+          copyQueue(aThatUid, aThatNode, aThatUid+','+offset, fRespond);
         else
           fRespond();
         function fRespond() {
@@ -637,13 +640,11 @@ Link.prototype = {
     var that = this;
     clearTimeout(that.loginTimer);
     that.loginTimer = null;
-    sRegSvc.verify(iReq.userId, iReq.nodeId, function(err, ok) {
+    sRegSvc.verify(iReq.userId, iReq.nodeId, function(err, offset) {
       if (!that.conn)
         return;
-      var aNode = iReq.userId+iReq.nodeId;
-      if      (err || !ok)       var aErr = 'invalid login';
-      else if (aNode in sActive) var aErr = 'node already active';
-      else if (sShutdown)        var aErr = 'shutdown';
+      var aNode = iReq.userId+','+offset;
+      var aErr = err ? err.message : aNode in sActive ? 'node already active' : sShutdown ? 'shutdown' : null;
       if (aErr) {
         that.conn.write(1, 'binary', packMsg({op:'quit', info:aErr}));
         that.conn.close();
@@ -781,8 +782,8 @@ Link.prototype = {
               iAckErr += (iAckErr && '\n') + err.message;
             } else {
               for (var aN in list)
-                if (uid in iReq.to || uid+aN !== that.node)
-                  aTo[uid+aN] = uid in iReq.to ? iReq.to[uid] : 1;
+                if (uid in iReq.to || uid+','+aN !== that.node)
+                  aTo[uid+','+aN] = uid in iReq.to ? iReq.to[uid] : 1;
             }
             if (--aToCount > 0)
               return;

@@ -223,19 +223,20 @@ RegDb.prototype = {
   } ,
 
   verify: function(iUid, iNode, iCallback) {
-    var that = this;
+    var aErr = !(iUid in this.db.uid)              ? new Error('userId unknown')
+             : !(iNode in this.db.uid[iUid].nodes) ? new Error('nodeId unknown') : null;
+    var aOffset = aErr ? undefined : this.db.uid[iUid].nodes[iNode];
     process.nextTick(function() {
-      iCallback(null, iUid in that.db.uid && iNode in that.db.uid[iUid].nodes);
+      iCallback(aErr, aOffset);
     });
   } ,
 
   getNodes: function(iUid, iCallback) {
-    var that = this;
-    var aList, aErr = that.db.uid[iUid] ? null : new Error('no such uid');
-    if (that.db.uid[iUid]) {
-      aList = {};
-      for (var a in that.db.uid[iUid].nodes)
-        aList[a] = true;
+    var aErr = this.db.uid[iUid] ? null : new Error('userId unknown');
+    if (this.db.uid[iUid]) {
+      var aList = {};
+      for (var a in this.db.uid[iUid].nodes)
+        aList[this.db.uid[iUid].nodes[a]] = true;
     }
     process.nextTick(function() {
       iCallback(aErr, iUid, aList);
