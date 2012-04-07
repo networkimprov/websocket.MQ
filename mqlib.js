@@ -44,13 +44,25 @@ module.exports.Link = Link;
 
 module.exports.packMsg = packMsg; // for in-process testing
 
-function writeAll(iFd, iBuf, iCallback) {
-  fs.write(iFd, iBuf, 0, iBuf.length, null, function (err, written) {
-    if (err) return iCallback(err);
-    if (written === iBuf.length)
-      iCallback(null);
-    else
-      writeAll(iFd, iBuf.slice(written), iCallback);
+function storeFile(iPath, iBuf, iCallback) {
+  fs.open(iPath, 'w', 0600, function(err, fd) {
+    if (err)
+      return iCallback(err);
+    fWrite(iBuf);
+    function fWrite(buf) {
+      fs.write(fd, buf, 0, buf.length, null, function(err, written) {
+        if (err) {
+          fs.close(fd);
+          return iCallback(err);
+        }
+        if (written < buf.length)
+          return fWrite(buf.slice(written));
+        fs.fsync(fd, function(err) {
+          fs.close(fd);
+          iCallback(err);
+        });
+      });
+    }
   });
 }
 
@@ -756,58 +768,51 @@ Link.prototype = {
       return iCallback({message:'msg lacks recipients'});
     var aId = this._makeId();
     var aMsg = packMsg({op:that.kQueueOp[iReq.op], id:aId, from:that.uid, etc:iReq.etc}, iBuf);
-    fs.open(sTempDir+aId, 'w', 0600, function(err, fd) {
+    storeFile(sTempDir+aId, aMsg, function(err) {
       if (err) return iCallback(err);
-      writeAll(fd, aMsg, function(err) { // attempt write to temp
-        if (err) { fs.close(fd, noop); return iCallback(err); }
-        fs.fsync(fd, function(err) {
-          fs.close(fd, noop);
-          if (err) return iCallback(err);
-          sMsgCache.add(aId, aMsg);
-          var aTo = {}, aToCount = 0;
-          for (var aUid in iReq.to) {
-            ++aToCount;
-            addPending(aUid, aId);
-            sRegSvc.getNodes(aUid, fUidCb);
-          }
-          if (!iReq.noNodes && !(that.uid in iReq.to)) {
-            ++aToCount;
-            addPending(that.uid, aId);
-            sRegSvc.getNodes(that.uid, fUidCb);
-          }
-          function fUidCb(err, uid, list) {
-            if (err) {
-              console.log(err.message);
-              if (!iAckErr) iAckErr = '';
-              iAckErr += (iAckErr && '\n') + err.message;
-            } else {
-              for (var aN in list)
-                if (uid in iReq.to || uid+','+aN !== that.node)
-                  aTo[uid+','+aN] = uid in iReq.to ? iReq.to[uid] : 1;
-            }
-            if (--aToCount > 0)
-              return;
-            for (var aN in aTo) {
-              ++aToCount;
-              queueItem(aN, aId, aTo[aN], fToCb);
-            }
-            if (aToCount === 0) {
-              sMsgCache.unlink(aId);
-              fToCb();
-            }
-            function fToCb() {
-              if (--aToCount > 0)
-                return;
-              for (var aUid in iReq.to)
-                delPending(aUid, aId);
-              if (!iReq.noNodes && !(that.uid in iReq.to))
-                delPending(that.uid, aId);
-              fs.unlink(sTempDir+aId, noop);
-              iCallback(null, iAckErr);
-            }
-          }
-        });
-      });
+      sMsgCache.add(aId, aMsg);
+      var aTo = {}, aToCount = 0;
+      for (var aUid in iReq.to) {
+        ++aToCount;
+        addPending(aUid, aId);
+        sRegSvc.getNodes(aUid, fUidCb);
+      }
+      if (!iReq.noNodes && !(that.uid in iReq.to)) {
+        ++aToCount;
+        addPending(that.uid, aId);
+        sRegSvc.getNodes(that.uid, fUidCb);
+      }
+      function fUidCb(err, uid, list) {
+        if (err) {
+          console.log(err.message);
+          if (!iAckErr) iAckErr = '';
+          iAckErr += (iAckErr && '\n') + err.message;
+        } else {
+          for (var aN in list)
+            if (uid in iReq.to || uid+','+aN !== that.node)
+              aTo[uid+','+aN] = uid in iReq.to ? iReq.to[uid] : 1;
+        }
+        if (--aToCount > 0)
+          return;
+        for (var aN in aTo) {
+          ++aToCount;
+          queueItem(aN, aId, aTo[aN], fToCb);
+        }
+        if (aToCount === 0) {
+          sMsgCache.unlink(aId);
+          fToCb();
+        }
+        function fToCb() {
+          if (--aToCount > 0)
+            return;
+          for (var aUid in iReq.to)
+            delPending(aUid, aId);
+          if (!iReq.noNodes && !(that.uid in iReq.to))
+            delPending(that.uid, aId);
+          fs.unlink(sTempDir+aId, noop);
+          iCallback(null, iAckErr);
+        }
+      }
     });
   } ,
 
