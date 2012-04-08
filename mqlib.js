@@ -730,21 +730,27 @@ Link.prototype = {
 
   handle_post: function(iReq, iBuf) {
     var that = this;
-    var aCbErr, aCbCount = 0;
+    var aPoCount = 0, aLsCount = 0, aLsErr, aPoErr;
     for (var a in iReq.to) {
       iReq.to[a] = +iReq.to[a];
-      if (iReq.to[a] === NaN || iReq.to[a] < 2 || iReq.to[a] > 3)
-        continue;
-      ++aCbCount;
-      sRegSvc.listLookup(a, that.uid, fSend);
+      if (iReq.to[a] === 0) {
+        delete iReq.to[a];
+        ++aPoCount;
+        var aTo = {};
+        aTo[a] = 0;
+        that._postSend({op:'post', to:aTo, etc:iReq.etc, noNodes:1}, iBuf, null, fAck);
+      } else if (iReq.to[a] === 2 || iReq.to[a] === 3) {
+        ++aLsCount;
+        sRegSvc.listLookup(a, that.uid, fAddList);
+      }
     }
-    if (aCbCount === 0)
-      that._postSend(iReq, iBuf, null, fAck);
+    if (aLsCount === 0)
+      fPostCommon();
 
-    function fSend(err, list, members) {
+    function fAddList(err, list, members) {
       if (err) {
-        if (!aCbErr) aCbErr = '';
-        aCbErr += (aCbErr && '\n') + err.message;
+        if (!aLsErr) aLsErr = '';
+        aLsErr += (aLsErr && '\n') + err.message;
       } else {
         for (var a in members)
           if (a !== that.uid)
@@ -753,11 +759,21 @@ Link.prototype = {
       if (iReq.to[list] === 3)
         iReq.to[that.uid] = 1;
       delete iReq.to[list];
-      if (--aCbCount === 0)
-        that._postSend(iReq, iBuf, aCbErr, fAck);
+      if (--aLsCount === 0)
+        fPostCommon();
+    }
+    function fPostCommon() {
+      for (var any in iReq.to) break;
+      if (aPoCount === 0 || any || !iReq.noNodes) {
+        ++aPoCount;
+        that._postSend(iReq, iBuf, aLsErr, fAck);
+      }
     }
     function fAck(err, toErr) {
-      that._ack(iReq.id, err, toErr);
+      if (!aPoErr || !aPoErr.message)
+        aPoErr = err || toErr && (aPoErr ? aPoErr+'\n' : '') + toErr;
+      if (--aPoCount === 0)
+        that._ack(iReq.id, aPoErr && aPoErr.message && aPoErr, aPoErr && aPoErr.message ? undefined : aPoErr);
     }
   } ,
 
