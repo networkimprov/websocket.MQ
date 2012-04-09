@@ -83,10 +83,10 @@ function MqClient() {
   this.ws.on('data', function(frame, buf) {
     try {
     var aReq = unpackMsg(buf);
-    if (typeof aReq.op !== 'string' || typeof that.sParams[aReq.op] === 'undefined')
+    if (typeof aReq.op !== 'string' || typeof that.kParams[aReq.op] === 'undefined')
       throw new Error('invalid request op: '+aReq.op);
-    for (var a in that.sParams[aReq.op])
-      if (typeof aReq[a] !== that.sParams[aReq.op][a])
+    for (var a in that.kParams[aReq.op])
+      if (typeof aReq[a] !== that.kParams[aReq.op][a])
         throw new Error(aReq.op+' request missing param '+a);
     } catch (err) {
       that.event_error(err);
@@ -113,9 +113,7 @@ function MqClient() {
 MqClient.packMsg = packMsg;
 MqClient.unpackMsg = unpackMsg;
 
-MqClient.prototype = {
-
-  sParams: {
+  MqClient.prototype.kParams = {
     registered: {  },
     added:      {  },
     listEdited: { id:'string', from:'string', etc:'object' },
@@ -123,71 +121,70 @@ MqClient.prototype = {
     ack:        { id:'string', type:'string' },
     info:       { info:'string' },
     quit:       { info:'string' }
-  } ,
+  };
 
-  event_error: function(msg) { throw new Error(msg) } ,
+  MqClient.prototype.event_error = function(msg) { throw new Error(msg) };
 
-  connect: function(iHost, iPort, iCallback) {
+  MqClient.prototype.connect = function(iHost, iPort, iCallback) {
     this.host = iHost;
     this.port = iPort || 8008;
     this.on('connect', iCallback);
     this.socket.connect(this.port, this.host);
-  } ,
+  };
 
-  close: function() {
+  MqClient.prototype.close = function() {
     this.ws.end();
     //this.socket.destroy();
-  } ,
+  };
 
-  isOpen: function() {
+  MqClient.prototype.isOpen = function() {
     return this.socket.readable && this.socket.writable;
-  } ,
+  };
 
-  register: function(iUid, iNewNode, iAliases) {
+  MqClient.prototype.register = function(iUid, iNewNode, iAliases) {
     var aMsg = packMsg({op:'register', userId:iUid, newNode:iNewNode, aliases:iAliases});
     this.ws.write(1, 'binary', aMsg);
-  } ,
+  };
 
-  addNode: function(iUid, iNewNode, iPrevNode) {
+  MqClient.prototype.addNode = function(iUid, iNewNode, iPrevNode) {
     var aMsg = packMsg({op:'addNode', userId:iUid, newNode:iNewNode, prevNode:iPrevNode});
     this.ws.write(1, 'binary', aMsg);
-  } ,
+  };
 
-  login: function(iUid, iNode) {
+  MqClient.prototype.login = function(iUid, iNode) {
     var aMsg = packMsg({op:'login', userId:iUid, nodeId:iNode});
     this.ws.write(1, 'binary', aMsg);
-  } ,
+  };
 
-  listEdit: function(iTo, iType, iMember, iId, iEtc) {
+  MqClient.prototype.listEdit = function(iTo, iType, iMember, iId, iEtc) {
     var aMsg = packMsg({op:'listEdit', to:iTo, type:iType, member:iMember, id:iId, etc:iEtc}, null);
     this.ws.write(1, 'binary', aMsg);
-  } ,
+  };
 
-  post: function(iToList, iMsg, iId, iEtc) {
+  MqClient.prototype.post = function(iToList, iMsg, iId, iEtc) {
     var aMsg = packMsg({op:'post', to:iToList, id:iId, etc:iEtc}, iMsg);
     this.ws.write(1, 'binary', aMsg);
-  } ,
+  };
 
-  ping: function(iAlias, iId, iEtc) {
+  MqClient.prototype.ping = function(iAlias, iId, iEtc) {
     var aMsg = packMsg({op:'ping', alias:iAlias, id:iId, etc:iEtc});
     this.ws.write(1, 'binary', aMsg);
-  } ,
+  };
 
-  ack: function(iId, iType) {
+  MqClient.prototype.ack = function(iId, iType) {
     var aMsg = packMsg({op:'ack', id:iId, type:iType});
     this.ws.write(1, 'binary', aMsg);
-  } ,
+  };
 
-  send: function(iPackedMsg) {
+  MqClient.prototype.send = function(iPackedMsg) {
     this.ws.write(1, 'binary', iPackedMsg);
-  } ,
+  };
 
-  on: function(iEvt, iFn) {
+  MqClient.prototype.on = function(iEvt, iFn) {
     if (typeof iEvt !== 'string')
       throw new Error('not a string '+iEvt);
     if (typeof iFn !== 'function')
       throw new Error('not a function '+iFn);
     this['event_'+iEvt] = iFn;
-  }
-};
+  };
 

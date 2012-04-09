@@ -149,9 +149,7 @@ function RegDb(iFileName) {
   this.db = aData ? JSON.parse(aData) : { uid:{}, alias:{}, list:{} };
 }
 
-RegDb.prototype = {
-
-  register: function(iUid, iNewNode, iPrevNode, iAliases, iCallback, iReReg) {
+  RegDb.prototype.register = function(iUid, iNewNode, iPrevNode, iAliases, iCallback, iReReg) {
     var aHas = iUid in this.db.uid;
     if (!iReReg && aHas || iReReg && !aHas)
       var aErr = aHas ? 'user exists' : 'no such user';
@@ -204,13 +202,13 @@ RegDb.prototype = {
     process.nextTick(function() {
       iCallback(null, aAccept && aAccept.join(' '), iNewNode ? that.db.uid[iUid].nodes[iNewNode] : undefined);
     });
-  } ,
+  };
 
-  reregister: function(iUid, iNewNode, iPrevNode, iAliases, iCallback) {
+  RegDb.prototype.reregister = function(iUid, iNewNode, iPrevNode, iAliases, iCallback) {
     this.register(iUid, iNewNode, iPrevNode, iAliases, iCallback, true);
-  } ,
+  };
 
-  remove: function(iUid) {
+  RegDb.prototype.remove = function(iUid) {
     if (!iUid || !this.db.uid[iUid])
       return false;
     for (var a=0; a < this.db.uid[iUid].aliases.length; ++a)
@@ -220,18 +218,18 @@ RegDb.prototype = {
     delete this.db.uid[iUid];
     fs.writeFileSync(this.file, JSON.stringify(this.db), 'ascii');
     return true;
-  } ,
+  };
 
-  verify: function(iUid, iNode, iCallback) {
+  RegDb.prototype.verify = function(iUid, iNode, iCallback) {
     var aErr = !(iUid in this.db.uid)              ? new Error('userId unknown')
              : !(iNode in this.db.uid[iUid].nodes) ? new Error('nodeId unknown') : null;
     var aOffset = aErr ? undefined : this.db.uid[iUid].nodes[iNode];
     process.nextTick(function() {
       iCallback(aErr, aOffset);
     });
-  } ,
+  };
 
-  getNodes: function(iUid, iCallback) {
+  RegDb.prototype.getNodes = function(iUid, iCallback) {
     var aErr = this.db.uid[iUid] ? null : new Error('userId unknown');
     if (this.db.uid[iUid]) {
       var aList = {};
@@ -241,22 +239,22 @@ RegDb.prototype = {
     process.nextTick(function() {
       iCallback(aErr, iUid, aList);
     });
-  } ,
+  };
 
-  lookup: function(iAlias, iCallback) {
+  RegDb.prototype.lookup = function(iAlias, iCallback) {
     var that = this;
     process.nextTick(function() {
       var aEr = iAlias in that.db.alias ? null : new Error('alias not defined');
       iCallback(aEr, that.db.alias[iAlias]);
     });
-  } ,
+  };
 
-  listInvite: function(iName, iBy, iAlias,  iCallback) { this._listMod('in', iName, iBy, iAlias,  iCallback); } ,
-  listAdd:    function(iName, iBy, iMember, iCallback) { this._listMod('ad', iName, iBy, iMember, iCallback); } ,
-  listRemove: function(iName, iBy, iMember, iCallback) { this._listMod('rm', iName, iBy, iMember, iCallback); } ,
-  //listRenew:  function(iName, iBy, iMember, iCallback) { this._listMod('nw', iName, iBy, iMember, iCallback); } ,
+  RegDb.prototype.listInvite = function(iName, iBy, iAlias,  iCallback) { this._listMod('in', iName, iBy, iAlias,  iCallback) };
+  RegDb.prototype.listAdd    = function(iName, iBy, iMember, iCallback) { this._listMod('ad', iName, iBy, iMember, iCallback) };
+  RegDb.prototype.listRemove = function(iName, iBy, iMember, iCallback) { this._listMod('rm', iName, iBy, iMember, iCallback) };
+  //RegDb.prototype.listRenew =  function(iName, iBy, iMember, iCallback) { this._listMod('nw', iName, iBy, iMember, iCallback) };
 
-  _listMod: function(iOp, iName, iBy, iMember, iCallback) {
+  RegDb.prototype._listMod = function(iOp, iName, iBy, iMember, iCallback) {
     var aHasB, aHasM, aHasL = iName in this.db.list;
     switch (iOp) {
     case 'rm':
@@ -313,9 +311,9 @@ RegDb.prototype = {
     }
     fs.writeFileSync(this.file, JSON.stringify(this.db), 'ascii');
     process.nextTick(function() { iCallback(null, aReturn) });
-  } ,
+  };
 
-  listLookup: function(iName, iBy, iCallback) {
+  RegDb.prototype.listLookup = function(iName, iBy, iCallback) {
     var aHasL = iName in this.db.list;
     var aHasB = aHasL && iBy in this.db.list[iName];
     if (!aHasL || !aHasB) {
@@ -331,9 +329,7 @@ RegDb.prototype = {
     process.nextTick(function() {
       iCallback(null, iName, aList);
     });
-  }
-
-}
+  };
 
 main(process.argv);
 
